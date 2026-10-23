@@ -1,6 +1,6 @@
-import { normalizeURL, withTrailingSlash, withoutTrailingSlash } from 'ufo'
-import { resolve } from 'pathe'
 import type { RouteDefinition } from '../types'
+import { resolve } from 'pathe'
+import { normalizeURL, withoutTrailingSlash, withTrailingSlash } from 'ufo'
 
 /**
  * From https://github.com/nuxt/nuxt.js/blob/dev/packages/utils/src/route.js
@@ -23,7 +23,7 @@ function getRoutePathExtension(key: string) {
   return key
 }
 
-const sortRoutes = function sortRoutes(routes: NuxtRoute[]) {
+function sortRoutes(routes: NuxtRoute[]) {
   routes.sort((a, b) => {
     if (!a.path.length)
       return -1

@@ -1,5 +1,4 @@
 <script lang="ts" setup>
-import { sum } from 'lodash-es'
 import type { UnlighthouseColumn, UnlighthouseRouteReport } from '@unlighthouse/core'
 
 const props = defineProps<{
@@ -7,16 +6,25 @@ const props = defineProps<{
   column: UnlighthouseColumn
 }>()
 
+// Cache audit keys for performance
+const IMAGE_AUDIT_KEYS = [
+  'unsized-images',
+  'preload-lcp-image',
+  'offscreen-images',
+  'modern-image-formats',
+  'uses-optimized-images',
+  'efficient-animated-content',
+  'uses-responsive-images',
+] as const
+
 const imageIssues = computed(() => {
-  return sum([
-    props.report.report?.audits['unsized-images']?.details.items.length || 0,
-    props.report.report?.audits['preload-lcp-image']?.details.items.length || 0,
-    props.report.report?.audits['offscreen-images']?.details.items.length || 0,
-    props.report.report?.audits['modern-image-formats']?.details.items.length || 0,
-    props.report.report?.audits['uses-optimized-images']?.details.items.length || 0,
-    props.report.report?.audits['efficient-animated-content']?.details.items.length || 0,
-    props.report.report?.audits['uses-responsive-images']?.details.items.length || 0,
-  ])
+  const audits = props.report.report?.audits
+  if (!audits)
+    return 0
+
+  // Use native reduce instead of lodash sum for better performance
+  return IMAGE_AUDIT_KEYS.reduce((total, key) =>
+    total + (audits[key]?.details.items.length || 0), 0)
 })
 </script>
 

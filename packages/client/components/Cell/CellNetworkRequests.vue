@@ -1,12 +1,14 @@
 <script lang="ts" setup>
-import { get, groupBy, sum } from 'lodash-es'
 import type { UnlighthouseColumn, UnlighthouseRouteReport } from '@unlighthouse/core'
+import { get, groupBy } from 'lodash-es'
 import { formatBytes, website } from '../../logic'
 
 const props = defineProps<{
   report: UnlighthouseRouteReport
   column: UnlighthouseColumn
 }>()
+
+const sum = (arr: number[] = []) => arr.reduce((a, b) => a + (b || 0), 0)
 
 const value = computed(() => get(props.report, props.column.key))
 
@@ -46,9 +48,9 @@ const requestsMapped = computed(() => {
           <span class="opacity-70 ml-2">{{ group.size }}</span>
           <template #tooltip>
             <div v-for="(item, key) in group.items" :key="key" class="mb-1 flex text-xs ">
-              <span class="break-all opacity-90 flex-grow"><a :href="item.url" class="hover:no-underline underline">{{ item.url.replace(website, '') }}</a></span>
-              <span class="opacity-70 whitespace-nowrap ml-1 flex-shrink break-none">{{ formatBytes(item.transferSize) }}</span>
-              <span class="opacity-70 whitespace-nowrap ml-1 flex-shrink">{{ Math.round(item.networkEndTime - item.networkRequestTime) }}ms</span>
+              <span class="break-all opacity-90 grow"><a :href="item.url" class="hover:no-underline underline">{{ item.url.replace(website, '') }}</a></span>
+              <span class="opacity-70 whitespace-nowrap ml-1 shrink break-none">{{ formatBytes(item.transferSize) }}</span>
+              <span class="opacity-70 whitespace-nowrap ml-1 shrink">{{ Math.round(item.networkEndTime - item.networkRequestTime) }}ms</span>
             </div>
           </template>
         </tooltip>

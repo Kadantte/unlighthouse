@@ -1,6 +1,6 @@
+import type { UnlighthouseColumn, UnlighthouseTabs, UserConfig } from './types'
 import os from 'node:os'
 import { Cluster } from 'puppeteer-cluster'
-import type { UnlighthouseColumn, UnlighthouseTabs, UserConfig } from './types'
 
 export const AppName = 'Unlighthouse'
 export const ClientPkg = '@unlighthouse/client'
@@ -40,7 +40,8 @@ export const DefaultColumns: Record<UnlighthouseTabs, UnlighthouseColumn[]> = {
     {
       cols: 1,
       label: 'FID',
-      tooltip: 'The maximum potential First Input Delay that your users could experience is the duration of the longest task. [Learn more](https://web.dev/lighthouse-max-potential-fid/).',
+      warning: true,
+      tooltip: 'Warning: This is deprecated in favour if INP which is not yet supported by Unlighthouse. The maximum potential First Input Delay that your users could experience is the duration of the longest task. [Learn more](https://web.dev/lighthouse-max-potential-fid/).',
       sortKey: 'numericValue',
       key: 'report.audits.max-potential-fid',
     },
@@ -205,8 +206,8 @@ export const defaultConfig: UserConfig = {
     workerCreationDelay: 500,
     retryLimit: 3,
     timeout: 5 * 60 * 1000, // wait for up to 5 minutes.
-    // max concurrency is the amount of cpu cores we have
-    maxConcurrency: Math.max(os.cpus().length - 1, 1),
+    // lighthouse runs in its own process so we can use half of the available cores
+    maxConcurrency: Math.max(Math.floor(os.cpus().length / 2), 1),
     skipDuplicateUrls: false,
     retryDelay: 2000,
     // Important, when using Lighthouse we want browser isolation.

@@ -1,11 +1,17 @@
 ![unlighthouse - Scan your entire website with Google Lighthouse.](https://repository-images.githubusercontent.com/423079536/c88a81ee-43ec-40fc-a615-1d29bbeaaeb4)
-<p align="center">
-<a href="https://www.npmjs.com/package/@unlighthouse/core" target="__blank"><img src="https://img.shields.io/npm/v/@unlighthouse/core?color=2B90B6&label=" alt="NPM version"></a>
-<a href="https://www.npmjs.com/package/@unlighthouse/core" target="__blank"><img alt="NPM Downloads" src="https://img.shields.io/npm/dm/@unlighthouse/core?color=349dbe&label="></a>
-<a href="https://unlighthouse.dev/" target="__blank"><img src="https://img.shields.io/static/v1?label=&message=docs%20%26%20demos&color=45b8cd" alt="Docs & Demos"></a>
-<br>
-<a href="https://github.com/harlan-zw/unlighthouse" target="__blank"><img alt="GitHub stars" src="https://img.shields.io/github/stars/harlan-zw/unlighthouse?style=social"></a>
-</p>
+
+<h1>Unlighthouse</h1>
+
+[![npm version][npm-version-src]][npm-version-href]
+[![npm downloads][npm-downloads-src]][npm-downloads-href]
+[![License][license-src]][license-href]
+<a href="https://skilld.dev/gh/harlan-zw/unlighthouse">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://skilld.dev/b/harlan-zw/unlighthouse?theme=dark">
+    <source media="(prefers-color-scheme: light)" srcset="https://skilld.dev/b/harlan-zw/unlighthouse?theme=light">
+    <img alt="Skill repository on skilld.dev" src="https://skilld.dev/b/harlan-zw/unlighthouse?theme=light">
+  </picture>
+</a>
 
 <p align="center">
 Unlighthouse scans your entire site using Google Lighthouse,<br> with a modern UI, minimal config and smart sampling.
@@ -17,16 +23,13 @@ Unlighthouse scans your entire site using Google Lighthouse,<br> with a modern U
 <table>
 <tbody>
 <td align="center">
-<img width="2000" height="0" /><br>
-Status: <b><a href="https://github.com/harlan-zw/unlighthouse/releases/tag/v0.12.2">v0.12.2 Released 🎉</a></b><br>
 <sub>Made possible by my <a href="https://github.com/sponsors/harlan-zw">Sponsor Program 💖</a><br> Follow me <a href="https://twitter.com/harlan_zw">@harlan_zw</a> 🐦 • Join <a href="https://discord.gg/275MBUBvgP">Discord</a> for help</sub><br>
-<img width="2000" height="0" />
 </td>
 </tbody>
 </table>
 </p>
 
-### Quick Setup
+## Quick Setup
 
 Run the following command:
 
@@ -36,7 +39,10 @@ npx unlighthouse --site <your-site>
 pnpm dlx unlighthouse --site <your-site>
 ```
 
-_Requirements: Node >= 18.x._
+> [!TIP]
+> Using an AI agent? Get the unlighthouse Skill on [skilld.dev/gh/harlan-zw/unlighthouse](https://skilld.dev/gh/harlan-zw/unlighthouse).
+
+_Requirements: Node >= 22.18.0._
 
 ## Getting Started
 
@@ -44,12 +50,12 @@ Install instructions for all integrations can be found on the [docs](https://unl
 
 Need a hand? Join the [Discord](https://discord.gg/275MBUBvgP) for one-on-one help.
 
-#### gitignore
+### gitignore
 
 Unlighthouse will save your reports in `outputDir`,
 it's recommended you .gitignore these files.
 
-```
+```shell
 .unlighthouse
 ```
 
@@ -72,10 +78,20 @@ Integration instructions, Guides, API and config spec can be found on [docs](htt
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/harlan-zw/static/main/sponsors.svg">
-    <img src='https://raw.githubusercontent.com/harlan-zw/static/main/sponsors.svg'/>
+    <img src='https://raw.githubusercontent.com/harlan-zw/static/main/sponsors.svg' alt='Sponsors'/>
   </a>
 </p>
 
 ## License
 
-MIT License © 2022 [Harlan Wilton](https://github.com/harlan-zw)
+Licensed under the [MIT license](https://github.com/harlan-zw/unlighthouse/blob/main/LICENSE.md).
+
+<!-- Badges -->
+[npm-version-src]: https://img.shields.io/npm/v/unlighthouse/latest.svg?style=flat&colorA=18181B&colorB=28CF8D
+[npm-version-href]: https://npmjs.com/package/unlighthouse
+
+[npm-downloads-src]: https://img.shields.io/npm/dm/unlighthouse.svg?style=flat&colorA=18181B&colorB=28CF8D
+[npm-downloads-href]: https://npmjs.com/package/unlighthouse
+
+[license-src]: https://img.shields.io/github/license/harlan-zw/unlighthouse.svg?style=flat&colorA=18181B&colorB=28CF8D
+[license-href]: https://github.com/harlan-zw/unlighthouse/blob/main/LICENSE.md

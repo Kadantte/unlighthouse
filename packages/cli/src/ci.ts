@@ -1,44 +1,30 @@
 import type { UserConfig } from '@unlighthouse/core'
-import fs from 'fs-extra'
-import { createUnlighthouse, generateClient, useLogger, useUnlighthouse } from '@unlighthouse/core'
-import { relative } from 'pathe'
-import { isCI } from 'std-env'
-import { handleError } from './errors'
-import type { CiOptions } from './types'
-import { pickOptions, validateHost, validateOptions } from './util'
-import createCli from './createCli'
-import { generateReportPayload, outputReport } from './reporters'
 import type { ReporterConfig } from './reporters/types'
+import type { CiOptions } from './types'
+import { setMaxListeners } from 'node:events'
+import { glob, rm } from 'node:fs/promises'
+import { createUnlighthouse, generateClient, useLogger, useUnlighthouse } from '@unlighthouse/core'
+import { relative, resolve } from 'pathe'
+import { isCI } from 'std-env'
+import { isScoreBelowBudget } from './ciBudget'
+import { createCiCli } from './createCli'
+import { handleError } from './errors'
+import { generateReportPayload, outputReport } from './reporters'
+import { pickCiOptions, validateHost, validateOptions } from './util'
 
 async function run() {
   const startTime = new Date()
 
-  const cli = createCli()
+  setMaxListeners(0)
 
-  cli.option('--budget <budget>', 'Budget (1-100), the minimum score which can pass.')
-  cli.option('--build-static <build-static>', 'Build a static website for the reports which can be uploaded.')
-  cli.option('--reporter <reporter>', 'The report to generate from results. Options: csv, csvExpanded, json, jsonExpanded or false. Default: json.')
-  cli.option('--lhci-host <lhci-host>', 'URL of your LHCI server.')
-  cli.option('--lhci-build-token <lhci-build-token>', 'LHCI build token, used to add data.')
-  cli.option('--lhci-auth <lhci-auth>', 'Basic auth for your LHCI server.')
+  const cli = createCiCli()
 
   const { options } = cli.parse() as unknown as { options: CiOptions }
 
   if (options.help || options.version)
     return
 
-  const resolvedOptions: UserConfig = pickOptions(options)
-  resolvedOptions.ci = {
-    budget: options.budget || undefined,
-    buildStatic: options.buildStatic || false,
-    reporter: options.reporter || 'jsonSimple',
-    reporterConfig: {
-      lhciHost: options.lhciHost,
-      lhciBuildToken: options.lhciBuildToken,
-      lhciAuth: options.lhciAuth,
-    },
-
-  }
+  const resolvedOptions: UserConfig = pickCiOptions(options)
 
   await createUnlighthouse({
     ...resolvedOptions,
@@ -54,6 +40,10 @@ async function run() {
 
   validateOptions(resolvedConfig)
 
+  // default reporter if not set by CLI or config file
+  if (!resolvedConfig.ci.reporter)
+    resolvedConfig.ci.reporter = 'jsonSimple'
+
   const logger = useLogger()
 
   let hasBudget = true
@@ -62,14 +52,19 @@ async function run() {
 
   await setCiContext()
   const { routes } = await start()
-  if (!routes.length) {
-    logger.error('Failed to queue routes for scanning. Please check the logs with debug enabled.')
+  // nothing queued means `worker-finished` never fires, so exit instead of waiting forever
+  if (!worker.reports().length) {
+    if (!routes.length)
+      logger.error('Failed to queue routes for scanning. Please check the logs with debug enabled.')
     process.exit(1)
   }
 
   hooks.hook('worker-finished', async () => {
     const end = new Date()
     const seconds = Math.round((end.getTime() - startTime.getTime()) / 1000)
+
+    // stop the progress spinner before any output, its exit handler would otherwise print "Canceled"
+    worker.clearProgressDisplay()
 
     logger.success(`Unlighthouse has finished scanning \`${resolvedConfig.site}\`: ${worker.reports().length} routes in \`${seconds}s\`.`)
 
@@ -81,12 +76,12 @@ async function run() {
         if (!categories)
           return
 
-        Object.values(categories).forEach((category: { score: number, key: string }) => {
+        Object.values(categories).forEach((category: { score: number | null, key: string }) => {
           let budget = resolvedConfig.ci.budget
           if (!Number.isInteger(budget))
             budget = resolvedConfig.ci.budget[category.key]
 
-          if (category.score && category.score * 100 < (budget as number)) {
+          if (isScoreBelowBudget(category.score, budget as number | undefined)) {
             logger.error(
               `${report.route.path} has invalid score \`${category.score}\` for category \`${category.key}\`.`,
             )
@@ -118,15 +113,15 @@ async function run() {
       const { runtimeSettings, resolvedConfig } = useUnlighthouse()
       await generateClient({ static: true })
       // delete the json lighthouse payloads, we don't need them for the static mode
-      const globby = await import('globby')
-      const jsonPayloads = await globby.globby(
+      const jsonPayloads = await Array.fromAsync(glob(
         ['lighthouse.json', '**/lighthouse.json', 'assets/lighthouse.fbx'],
-        { cwd: runtimeSettings.generatedClientPath, absolute: true },
-      )
+        { cwd: runtimeSettings.generatedClientPath },
+      ))
       logger.debug(
         `Deleting ${jsonPayloads.length} files not required for static build.`,
       )
-      for (const k in jsonPayloads) await fs.rm(jsonPayloads[k])
+      for (const payload of jsonPayloads)
+        await rm(resolve(runtimeSettings.generatedClientPath, payload))
 
       const relativeDir = `./${relative(resolvedConfig.root, runtimeSettings.generatedClientPath)}`
       logger.success(`Static report is ready for uploading: \`${relativeDir}\``)

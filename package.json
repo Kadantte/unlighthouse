@@ -1,50 +1,45 @@
 {
   "name": "@unlighthouse/monorepo",
   "type": "module",
-  "version": "0.13.1",
+  "version": "0.19.1",
   "private": true,
-  "packageManager": "pnpm@9.3.0",
+  "packageManager": "pnpm@11.9.0",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
     "cli": "JITI_ESM_RESOLVE=1 node packages/cli/dist/cli.mjs",
     "ci": "JITI_ESM_RESOLVE=1 node packages/cli/dist/ci.mjs",
     "ci:docs": "node packages/cli/dist/ci.mjs --site unlighthouse.dev --build-static --debug",
     "build": "pnpm run build:pkg",
     "build:docs": "cd docs && pnpm i && nuxi build",
-    "build:pkg": "pnpm -r --filter=./packages/** run build",
+    "build:pkg": "pnpm -r --filter='./packages/**' run build",
     "stub": "JITI_ESM_RESOLVE=true && pnpm -r --parallel run stub",
     "lint": "eslint . --fix",
-    "release": "bumpp package.json packages/*/package.json --commit --push --tag",
-    "test": "vitest",
+    "bump": "bumpp package.json packages/*/package.json --commit --push --tag",
+    "release": "pnpm build && pnpm bump",
+    "test": "vitest --exclude test/ci.test.ts",
+    "test:e2e": "vitest run test/ci.test.ts",
     "test:update": "vitest -u",
     "docs": "npm -C docs run dev",
     "docs:build": "npm -C docs run build",
-    "docs:serve": "npm -C docs run serve"
+    "docs:serve": "npm -C docs run serve",
+    "test:attw": "pnpm -r run test:attw",
+    "lint:docs": "pnpx markdownlint-cli ./docs && pnpx case-police 'docs/**/*.md' *.md",
+    "lint:docs:fix": "pnpx markdownlint-cli ./docs --fix && pnpx case-police 'docs/**/*.md' *.md --fix",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "2.19.0",
-    "bumpp": "^9.4.1",
-    "eslint": "^9.4.0",
-    "typescript": "5.3.3",
-    "unbuild": "^2.0.0",
-    "vite": "^5.2.13",
-    "vitest": "^1.6.0"
-  },
-  "pnpm": {
-    "packageExtensions": {
-      "puppeteer-cluster": {
-        "peerDependencies": {
-          "puppeteer-core": "*"
-        },
-        "peerDependenciesMeta": {
-          "puppeteer": {
-            "optional": true
-          }
-        }
-      }
-    }
-  },
-  "resolutions": {
-    "typescript": "5.3.3"
+    "@antfu/eslint-config": "catalog:",
+    "@arethetypeswrong/cli": "catalog:",
+    "bumpp": "catalog:",
+    "eslint": "catalog:",
+    "obuild": "catalog:",
+    "puppeteer": "catalog:",
+    "tinyexec": "catalog:dependencies",
+    "typescript": "catalog:",
+    "vite": "catalog:dependencies",
+    "vitest": "catalog:"
   }
 }

@@ -1,15 +1,14 @@
-import { createHash } from 'node:crypto'
-import { join } from 'node:path'
-import https from 'node:https'
+import type { NormalisedRoute, ResolvedUserConfig, UnlighthouseRouteReport } from './types'
 import { Buffer } from 'node:buffer'
-import { ensureDirSync } from 'fs-extra'
+import { createHash } from 'node:crypto'
+import dns from 'node:dns'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import sanitize from 'sanitize-filename'
 import slugify from 'slugify'
-import { joinURL, withLeadingSlash, withTrailingSlash, withoutLeadingSlash, withoutTrailingSlash } from 'ufo'
-import type { AxiosRequestConfig, AxiosResponse } from 'axios'
-import axios from 'axios'
-import type { NormalisedRoute, ResolvedUserConfig, UnlighthouseRouteReport } from './types'
-import { useUnlighthouse } from './unlighthouse'
+import { joinURL, withLeadingSlash, withoutLeadingSlash, withoutTrailingSlash, withTrailingSlash } from 'ufo'
+import { useLogger, useUnlighthouse } from './unlighthouse'
+import { resolveRequestHeaders } from './util/requestHeaders'
 
 export const ReportArtifacts = {
   html: 'payload.html',
@@ -90,7 +89,7 @@ export function createTaskReportFromRoute(route: NormalisedRoute): UnlighthouseR
   const reportPath = join(runtimeSettings.generatedClientPath, 'reports', sanitiseUrlForFilePath(route.path))
 
   // add missing dirs
-  ensureDirSync(reportPath)
+  mkdirSync(reportPath, { recursive: true })
 
   return {
     tasks: {
@@ -121,71 +120,110 @@ export function formatBytes(bytes: number, decimals = 2) {
   return `${Number.parseFloat((bytes / k ** i).toFixed(dm))} ${sizes[i]}`
 }
 
-export async function fetchUrlRaw(url: string, resolvedConfig: ResolvedUserConfig): Promise<{ error?: any, redirected?: boolean, redirectUrl?: string, valid: boolean, response?: AxiosResponse }> {
-  const axiosOptions: AxiosRequestConfig = {}
-  if (resolvedConfig.auth)
-    axiosOptions.auth = resolvedConfig.auth
+let dnsConfigured = false
+function configureDns() {
+  if (dnsConfigured)
+    return
+  dnsConfigured = true
+  dns.setServers([
+    '8.8.8.8', // Google
+    '1.1.1.1', // Cloudflare
+  ])
+}
 
-  axiosOptions.headers = axiosOptions.headers || {}
+export interface RawFetchResponse {
+  status: number
+  data: any
+  headers: Record<string, string>
+}
 
-  if (resolvedConfig.cookies) {
-    axiosOptions.headers.Cookie = resolvedConfig.cookies
-      .map(cookie => `${cookie.name}=${cookie.value}`)
-      .join('; ')
+export async function fetchUrlRaw(url: string, resolvedConfig: ResolvedUserConfig): Promise<{ error?: any, redirected?: boolean, redirectUrl?: string, valid: boolean, response?: RawFetchResponse }> {
+  configureDns()
+  const logger = useLogger()
+  const maxRetries = 3
+  let attempt = 0
+
+  let finalUrl = url
+  if (resolvedConfig.defaultQueryParams) {
+    const u = new URL(url)
+    for (const [k, v] of Object.entries(resolvedConfig.defaultQueryParams))
+      u.searchParams.set(k, String(v))
+    finalUrl = u.toString()
   }
 
-  if (resolvedConfig.extraHeaders) {
-    axiosOptions.headers = {
-      // fallback user agent, allow overriding
-      'User-Agent': 'Unlighthouse',
-      ...resolvedConfig.extraHeaders,
-      ...axiosOptions.headers,
-    }
+  const userAgent = resolvedConfig.userAgent || resolvedConfig.lighthouseOptions.emulatedUserAgent || 'Unlighthouse'
+  const headers: Record<string, string> = {
+    'User-Agent': String(userAgent),
+    // only the cookies that apply to this URL; fetch drops the Cookie header on a cross origin redirect
+    ...resolveRequestHeaders(resolvedConfig, { url: finalUrl, site: resolvedConfig.site || url }),
   }
 
-  if (resolvedConfig.defaultQueryParams)
-    axiosOptions.params = { ...resolvedConfig.defaultQueryParams, ...axiosOptions.params }
+  while (attempt < maxRetries) {
+    try {
+      const res = await fetch(finalUrl, {
+        headers,
+        redirect: 'follow',
+        signal: AbortSignal.timeout(30_000),
+      })
 
-  axiosOptions.httpsAgent = new https.Agent({
-    rejectUnauthorized: false,
-  })
-  axiosOptions.withCredentials = true
-  try {
-    const response = await axios.get(url, axiosOptions)
-    let responseUrl = response.request.res.responseUrl
-    if (responseUrl && axiosOptions.auth) {
-      // remove auth credentials from url (e.g. https://user:passwd@domain.de)
-      responseUrl = responseUrl.replace(/(?<=https?:\/\/)(.+?@)/g, '')
-    }
-    const redirected = responseUrl && responseUrl !== url
-    const redirectUrl = responseUrl
-    if (response.status < 200 || (response.status >= 300 && !redirected)) {
+      let responseUrl = res.url
+      if (responseUrl && resolvedConfig.auth) {
+        // remove auth credentials from url (e.g. https://user:passwd@domain.de)
+        responseUrl = responseUrl.replace(/(?<=https?:\/\/)(.+?@)/g, '')
+      }
+      // fetch normalises `https://site` to `https://site/`, which is not a redirect
+      const redirected = !!responseUrl && withoutTrailingSlash(responseUrl) !== withoutTrailingSlash(finalUrl)
+      const redirectUrl = responseUrl
+
+      const headersObj: Record<string, string> = {}
+      res.headers.forEach((v, k) => {
+        headersObj[k] = v
+      })
+
+      const contentType = headersObj['content-type'] || ''
+      let data: any
+      if (contentType.includes('application/json')) {
+        data = await res.json().catch(() => null)
+      }
+      else {
+        data = await res.text()
+      }
+
+      const response: RawFetchResponse = { status: res.status, data, headers: headersObj }
+
+      if (res.status < 200 || (res.status >= 300 && !redirected)) {
+        return {
+          valid: false,
+          redirected,
+          response,
+          redirectUrl,
+        }
+      }
       return {
-        valid: false,
+        valid: true,
         redirected,
         response,
         redirectUrl,
       }
     }
-    return {
-      valid: true,
-      redirected,
-      response,
-      redirectUrl,
+    catch (e: any) {
+      const code = e?.cause?.code || e?.code
+      logger.error('Fetch error message:', e?.message)
+      if (code)
+        logger.error('Fetch error code:', code)
+      if (e?.name === 'AbortError' || e?.name === 'TimeoutError' || code === 'ETIMEDOUT' || code === 'ENETUNREACH') {
+        attempt++
+        logger.info(`Retrying request... (${attempt}/${maxRetries})`)
+        continue
+      }
+      return {
+        error: e,
+        valid: false,
+      }
     }
   }
-  catch (e) {
-    return {
-      error: e,
-      valid: false,
-    }
+  return {
+    error: new Error('Max retries reached'),
+    valid: false,
   }
-}
-
-export function asRegExp(rule: string | RegExp): RegExp {
-  if (rule instanceof RegExp)
-    return rule
-  // need to escape the string for use in a RegExp but allow basic path characters like /
-  rule = rule.replace(/[-{}()+?.,\\^|#\s]/g, '\\$&')
-  return new RegExp(rule)
 }

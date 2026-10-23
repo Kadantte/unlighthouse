@@ -1,8 +1,8 @@
+import type { NormalisedRoute } from '../types'
 import { basename } from 'node:path'
 import { hasProtocol, isRelative, withBase, withLeadingSlash } from 'ufo'
-import type { NormalisedRoute } from '../types'
-import { hashPathName, trimSlashes } from '../util'
 import { useUnlighthouse } from '../unlighthouse'
+import { hashPathName, trimSlashes } from '../util'
 
 export function isScanOrigin(url: string): boolean {
   if (isRelative(url) || (url.startsWith('/') && !url.startsWith('//')))
@@ -33,8 +33,9 @@ export function normaliseRoute(url: string): NormalisedRoute {
   }
 
   const $url = new URL(url)
+  const hash = $url.hash.startsWith('#/') ? $url.hash : ''
   // make sure we start with a leading slash
-  const path = withLeadingSlash($url.pathname)
+  const path = `${withLeadingSlash($url.pathname)}${hash}${$url.search}`
 
   let normalised: Partial<NormalisedRoute> = {
     id: hashPathName(path),

@@ -1,8 +1,7 @@
 <script lang="ts" setup>
 import { createChart } from 'lightweight-charts'
-import dayjs from 'dayjs'
 import { isDark } from '../../../logic'
-import { useHumanMs } from '../../../logic/formatting'
+import { useHumanDate, useHumanMs } from '../../../logic/formatting'
 
 const props = defineProps<{
   value?: { time: string, value: number }[]
@@ -95,7 +94,9 @@ const themesData = {
 }
 
 onMounted(() => {
-  const _chart = createChart(chart.value!, {
+  let _chart: any = null
+
+  _chart = createChart(chart.value!, {
     height: Number(props.height) || 100,
     autoSize: true,
     rightPriceScale: {
@@ -172,7 +173,7 @@ onMounted(() => {
     else {
       // time will be in the same format that we supplied to setData.
       // thus it will be YYYY-MM-DD
-      const dateStr = dayjs(param.time).format('MMM D, YYYY')
+      const dateStr = useHumanDate(param.time as string)
       // toolTip.style.display = 'block'
       const _lcp = param.seriesData.get(areaSeries)!
       const lcp = _lcp.value !== undefined ? _lcp.value : _lcp.time
@@ -193,6 +194,13 @@ onMounted(() => {
     syncToTheme(isDark.value ? 'Dark' : 'Light')
   }, {
     immediate: true,
+  })
+
+  // Cleanup chart on unmount
+  onUnmounted(() => {
+    if (_chart) {
+      _chart.remove()
+    }
   })
 })
 </script>

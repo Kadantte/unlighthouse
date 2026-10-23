@@ -1,66 +1,109 @@
-import { defineConfig } from 'vite'
+import { rm } from 'node:fs/promises'
+import ui from '@nuxt/ui/vite'
 import Vue from '@vitejs/plugin-vue'
-import Icons from 'unplugin-icons/vite'
-import Components from 'unplugin-vue-components/vite'
-import WindiCSS from 'vite-plugin-windicss'
 import IconsResolver from 'unplugin-icons/resolver'
-import AutoImport from 'unplugin-auto-import/vite'
-import { HeadlessUiResolver } from 'unplugin-vue-components/resolvers'
-import * as fs from 'fs-extra'
+import { defineConfig } from 'vite'
+import packageJson from '../../package.json' with { type: 'json' }
 
-export default defineConfig({
-  mode: 'development',
+export default defineConfig(({ mode }) => ({
+  define: {
+    __UNLIGHTHOUSE_VERSION__: JSON.stringify(packageJson.version),
+  },
   plugins: [
     Vue(),
-    Components({
-      dirs: ['components'],
-      resolvers: [
-        IconsResolver(),
-        HeadlessUiResolver({}),
-      ],
-    }),
-    Icons(),
-    AutoImport({
-      imports: [
-        // presets
-        'vue',
-        'vue-router',
-      ],
-    }),
-    WindiCSS({
-      scan: {
-        dirs: [
-          '**',
+    ui({
+      ui: {
+        modal: {
+          variants: {
+            fullscreen: {
+              true: {
+                content: 'inset-0',
+              },
+              false: {
+                content: 'max-w-2xl',
+              },
+            },
+          },
+        },
+      },
+      autoImport: {
+        imports: [
+          'vue',
+          'vue-router',
+          '@vueuse/core',
         ],
+        dts: true,
+        vueTemplate: true,
+      },
+      components: {
+        dirs: ['components'],
+        extensions: ['vue'],
+        deep: true,
+        resolvers: [
+          IconsResolver({
+            prefix: 'i',
+            enabledCollections: ['carbon', 'mdi', 'la', 'logos', 'simple-line-icons', 'icomoon-free'],
+          }),
+        ],
+        dts: true,
+        directoryAsNamespace: false,
+        collapseSamePrefixes: false,
+        globalNamespaces: [],
+        include: [/\.vue$/, /\.vue\?vue/],
+        exclude: [/[\\/]node_modules[\\/]/, /[\\/]\.git[\\/]/, /[\\/]\.nuxt[\\/]/],
       },
     }),
+    // Icons({
+    //   compiler: 'vue3',
+    //   autoInstall: true,
+    // }),
     {
-      // remove our static data when we build
       name: 'unlighthouse-static-data-remover',
-      // remove the development payload, minimise client build
       async closeBundle() {
-        if (process.env.NODE_ENV === 'development')
+        if (mode === 'development')
           return
 
         const payloadPath = await this.resolve('./dist/assets/payload.js')
         if (payloadPath)
-          await fs.rm(payloadPath.id, {})
+          await rm(payloadPath.id, { recursive: true, force: true })
       },
     },
   ],
 
-  build: {
-    minify: false,
-    emptyOutDir: true,
-  },
-
   optimizeDeps: {
     include: [
       'vue',
+      'vue-router',
       '@vueuse/core',
+      '@vueuse/router',
+      'lightweight-charts',
+      'lodash-es',
+      'fuse.js',
     ],
     exclude: [
       'vue-demi',
+      '@tailwindcss/oxide',
     ],
   },
-})
+
+  build: {
+    rolldownOptions: {
+      external: [
+        '@tailwindcss/oxide',
+        '@tailwindcss/vite',
+        /\.node$/,
+        'exsolve',
+        'pkg-types',
+        'confbox',
+        'pathe',
+        /^@nuxt\/kit/,
+      ],
+    },
+  },
+
+  server: {
+    fs: {
+      strict: false,
+    },
+  },
+}))

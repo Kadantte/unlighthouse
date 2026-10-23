@@ -205,7 +205,7 @@ export default defineComponent({
         default: {
           size: 'sm',
           activeButton: {
-            class: 'text-teal-900 dark:text-teal-100 !font-bold underline',
+            class: 'text-teal-900 dark:text-teal-100 font-bold! underline',
           },
           inactiveButton: {
             color: 'bg-white text-teal-100',
@@ -271,7 +271,7 @@ export default defineComponent({
         aria-label="Prev"
         @click="onClickPrev"
       >
-        <i-carbon-chevron-left />
+        <UIcon name="i-carbon-chevron-left" />
       </BtnBasic>
     </slot>
 
@@ -280,7 +280,7 @@ export default defineComponent({
       :key="`${page}-${index}`"
       :disabled="disabled"
       v-bind="page === currentPage ? { ...(ui.default.activeButton || {}), ...activeButton } : { ...(ui.default.inactiveButton || {}), ...inactiveButton }"
-      :class="[{ 'pointer-events-none': typeof page === 'string', 'z-[1]': page === currentPage }, ui.base, ui.rounded]"
+      :class="[{ 'pointer-events-none': typeof page === 'string', 'z-1': page === currentPage }, ui.base, ui.rounded]"
       @click="() => onClickPage(page)"
     >
       {{ page }}
@@ -295,7 +295,7 @@ export default defineComponent({
         aria-label="Next"
         @click="onClickNext"
       >
-        <i-carbon-chevron-right />
+        <UIcon name="i-carbon-chevron-right" />
       </BtnBasic>
     </slot>
 
@@ -308,7 +308,7 @@ export default defineComponent({
         aria-label="Last"
         @click="onClickLast"
       >
-        <i-carbon-chevron-right />
+        <UIcon name="i-carbon-chevron-right" />
       </BtnBasic>
     </slot>
   </div>

@@ -16,7 +16,6 @@ export interface CliOptions {
   desktop?: boolean
   mobile?: boolean
   cache?: boolean
-  noCache?: boolean
   version?: boolean
   root?: string
   configFile?: string
@@ -30,11 +29,12 @@ export interface CliOptions {
   disableSitemap?: boolean
   disableDynamicSampling?: boolean
   sitemaps?: string
+  userAgent?: string
 }
 
 export interface CiOptions extends CliOptions {
-  budget: number
-  buildStatic: boolean
+  budget?: number
+  buildStatic?: boolean
   reporter?: ValidReportTypes | false
   lhciHost?: string
   lhciBuildToken?: string

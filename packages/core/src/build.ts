@@ -1,8 +1,3 @@
-import { dirname, join, resolve } from 'node:path'
-import fs from 'fs-extra'
-import { withLeadingSlash, withTrailingSlash } from 'ufo'
-import { pick } from 'lodash-es'
-import { useLogger, useUnlighthouse } from './unlighthouse'
 import type {
   ClientOptionsPayload,
   GenerateClientOptions,
@@ -10,7 +5,12 @@ import type {
   UnlighthouseContext,
   UnlighthouseRouteReport,
 } from './types'
-import { createScanMeta } from './data'
+import { cp, glob, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
+import { pick } from 'lodash-es'
+import { withLeadingSlash, withTrailingSlash } from 'ufo'
+import { createScanMeta } from './data/scanMeta'
+import { useLogger, useUnlighthouse } from './unlighthouse'
 
 /**
  * Copies the file contents of the @unlighthouse/client package and does transformation based on the provided configuration.
@@ -27,17 +27,26 @@ export async function generateClient(options: GenerateClientOptions = {}, unligh
 
   const { runtimeSettings, resolvedConfig, worker } = unlighthouse
 
-  const prefix = withTrailingSlash(withLeadingSlash(resolvedConfig.routerPrefix))
+  let prefix = withTrailingSlash(withLeadingSlash(resolvedConfig.routerPrefix))
+  // for non-specified paths we use relative
+  if (prefix === '/') {
+    prefix = ''
+  }
   const clientPathFolder = dirname(runtimeSettings.resolvedClientPath)
 
-  await fs.copy(clientPathFolder, runtimeSettings.generatedClientPath)
+  await cp(clientPathFolder, runtimeSettings.generatedClientPath, { recursive: true })
   // update the html with our config and base url if needed
-  const inlineScript = `window.__unlighthouse_static = ${options.static}`
-  let indexHTML = await fs.readFile(runtimeSettings.resolvedClientPath, 'utf-8')
+  const inlineScript = `window.__unlighthouse_static = ${!!options.static}`
+  let indexHTML = await readFile(runtimeSettings.resolvedClientPath, 'utf-8')
+
+  // More robust replacement that handles multiline script content
   indexHTML = indexHTML
-    .replace(/<script data-unlighthouse-inline>.*?<\/script>/gs, `<script data-unlighthouse-inline>${inlineScript}</script>`)
+    .replace(/<script data-unlighthouse-inline>[\s\S]*?<\/script>/g, `<script data-unlighthouse-inline>
+  ${inlineScript}
+  // boilerplate options to run the client by itself
+  </script>`)
     .replace(/(href|src)="\/assets\/(.*?)"/g, `$1="${prefix}assets/$2"`)
-  await fs.writeFile(resolve(runtimeSettings.generatedClientPath, 'index.html'), indexHTML, 'utf-8')
+  await writeFile(resolve(runtimeSettings.generatedClientPath, 'index.html'), indexHTML, 'utf-8')
 
   const staticData: { options: ClientOptionsPayload, scanMeta: ScanMeta, reports: UnlighthouseRouteReport[] } = {
     reports: [],
@@ -59,36 +68,47 @@ export async function generateClient(options: GenerateClientOptions = {}, unligh
   }
   // avoid exposing sensitive cookie / header options
   staticData.options.lighthouseOptions = { onlyCategories: resolvedConfig.lighthouseOptions.onlyCategories }
-  if (options.static) {
-    staticData.reports = worker.reports().map((r) => {
+  // Always include completed reports in payload so the dashboard has data
+  // even when opened after the scan finishes (WebSocket won't replay past events)
+  const completedReports = worker.reports().filter(r => r.tasks.inspectHtmlTask === 'completed')
+  if (completedReports.length > 0) {
+    staticData.reports = completedReports.map((r) => {
       return {
         ...r,
-        // avoid exposing user paths
-        artifactPath: '',
+        // In static mode, avoid exposing user paths
+        ...(options.static ? { artifactPath: '' } : {}),
       }
     })
   }
 
-  await fs.writeFile(
+  await writeFile(
     join(runtimeSettings.generatedClientPath, 'assets', 'payload.js'),
     `window.__unlighthouse_payload = ${JSON.stringify(staticData)}`,
     { encoding: 'utf-8' },
   )
 
   // update the baseurl within the modules
-  const globby = (await import('globby'))
   const clientAssetsPath = join(dirname(runtimeSettings.resolvedClientPath), 'assets')
-  const indexFile = (await globby.globby(['index.*.js'], { cwd: clientAssetsPath }))?.[0]
+  logger.debug(`Looking for index.*.js files in: ${clientAssetsPath}`)
+
+  const indexFiles = await Array.fromAsync(glob(['index*.js', 'index-*.js'], { cwd: clientAssetsPath }))
+  logger.debug(`Found index files:`, indexFiles)
+
+  const indexFile = indexFiles?.[0]
   if (indexFile) {
     const indexPath = join(clientAssetsPath, indexFile)
+    const outputPath = join(runtimeSettings.generatedClientPath, 'assets', indexFile)
+    logger.debug(`Processing index file: ${indexPath} -> ${outputPath}`)
+
     // should be a single entry
-    let indexJS = await fs.readFile(indexPath, 'utf-8')
+    let indexJS = await readFile(indexPath, 'utf-8')
     indexJS = indexJS
-      .replace('const base = "/";', `const base = "${prefix}";`)
-      .replace('createWebHistory("/")', `createWebHistory("${prefix}")`)
-    await fs.writeFile(indexPath.replace(clientPathFolder, runtimeSettings.generatedClientPath), indexJS, 'utf-8')
+      .replace('const base = "/";', `const base = window.location.pathname;`)
+      .replace('createWebHistory("/")', `createWebHistory(window.location.pathname)`)
+    await writeFile(outputPath, indexJS, 'utf-8')
   }
   else {
     logger.warn(`Failed to find index.[hash].js file from wd ${clientAssetsPath}.`)
+    logger.debug(`Searched patterns: ['index*.js', 'index-*.js']`)
   }
 }

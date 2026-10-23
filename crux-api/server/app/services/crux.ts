@@ -1,15 +1,20 @@
-import { withHttps, withTrailingSlash } from 'ufo'
+import type { H3Event } from 'h3'
 import type { FetchError } from 'ofetch'
 import { $fetch } from 'ofetch'
+import { withHttps, withTrailingSlash } from 'ufo'
 import { useRuntimeConfig } from '#imports'
 
-const cwvKeys = [
+type cwvKeys = [
   'largest_contentful_paint',
   'cumulative_layout_shift',
   'interaction_to_next_paint',
-] as const
+]
 
-export async function fetchCrux(domain: string, formFactor: 'PHONE' | 'TABLET' | 'DESKTOP' = 'PHONE') {
+export async function fetchCrux(event: H3Event, domain: string, formFactor: 'PHONE' | 'TABLET' | 'DESKTOP' = 'PHONE') {
+  const apiKey = useRuntimeConfig(event).google.cruxApiToken
+  if (!apiKey)
+    throw new Error('Missing NITRO_GOOGLE_CRUX_API_TOKEN — configure a CrUX API key in runtime config.')
+
   const origin = withTrailingSlash(withHttps(domain))
   const results = await $fetch(`/records:queryHistoryRecord`, {
     baseURL: 'https://chromeuxreport.googleapis.com/v1',
@@ -18,7 +23,7 @@ export async function fetchCrux(domain: string, formFactor: 'PHONE' | 'TABLET' |
       'Content-Type': 'application/json',
     },
     query: {
-      key: useRuntimeConfig().google.cruxApiToken,
+      key: apiKey,
     },
     body: {
       origin,
@@ -28,9 +33,14 @@ export async function fetchCrux(domain: string, formFactor: 'PHONE' | 'TABLET' |
     // 404 is okay, it just means there's no data for this domain
     if (e.status === 404)
       return { exists: false }
+    if (e.status === 403)
+      throw new Error(`CrUX API key is invalid or lacks permission for the CrUX History API.`)
+    if (e.status === 429)
+      throw new Error(`CrUX API rate limit exceeded — try again later.`)
+    throw new Error(`CrUX API error (${e.status}): ${e.data?.error?.message || e.message}`)
   })
 
-  if (results.exists === false)
+  if (!results || results.exists === false)
     return results
 
   const normalised = normaliseCruxHistory(results.record)
@@ -45,7 +55,7 @@ interface CrUXHistoryResult {
     origin: string
   }
   metrics: {
-    [key in typeof cwvKeys[number]]: {
+    [key in cwvKeys[number]]: {
       histogramTimeseries: Array<{
         start: number | string
         end?: number | string
@@ -74,7 +84,7 @@ interface NormalizedCrUXHistoryResult {
 }
 
 function normaliseCruxHistory(data: CrUXHistoryResult): NormalizedCrUXHistoryResult {
-  // we need to turn it into a time series data where we have each metric seperated into
+  // we need to turn it into a time series data where we have each metric separated into
   // an array like { value: number, time: number }[]
   // we also need to make sure that the data is sorted by time
   const { cumulative_layout_shift, largest_contentful_paint, interaction_to_next_paint } = data.metrics

@@ -1,5 +1,5 @@
-import { parse } from 'regexparam'
 import type { MockRouter, RouteDefinition } from '../types'
+import { parse } from 'regexparam'
 import { useLogger } from '../logger'
 
 /**

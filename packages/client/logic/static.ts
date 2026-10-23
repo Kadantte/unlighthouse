@@ -1,24 +1,32 @@
-// pull out client accessible options
-import { startCase } from 'lodash-es'
-import { $URL } from 'ufo'
-import CellNetworkRequests from '../components/Cell/CellNetworkRequests.vue'
-import CellImageIssues from '../components/Cell/CellImageIssues.vue'
+import type { UnlighthouseRouteReport } from '@unlighthouse/core'
+import { $URL, joinURL } from 'ufo'
 import CellColorContrast from '../components/Cell/CellColorContrast.vue'
-import CellMetaDescription from '../components/Cell/CellMetaDescription.vue'
-import CellIndexable from '../components/Cell/CellIndexable.vue'
-import CellScreenshotThumbnails from '../components/Cell/CellScreenshotThumbnails.vue'
 import CellImage from '../components/Cell/CellImage.vue'
-import CellTapTargets from '../components/Cell/CellTapTargets.vue'
-import CellWebVitals from '../components/Cell/CellWebVitals.vue'
+import CellImageIssues from '../components/Cell/CellImageIssues.vue'
+import CellIndexable from '../components/Cell/CellIndexable.vue'
 import CellLargestContentfulPaint from '../components/Cell/CellLargestContentfulPaint.vue'
 import CellLayoutShift from '../components/Cell/CellLayoutShift.vue'
-import MdiViewDashboard from '~icons/mdi/view-dashboard'
-import MdiSpeedometer from '~icons/mdi/speedometer'
-import MdiAccessibility from '~icons/mdi/accessibility'
-import MdiThumbUp from '~icons/mdi/thumb-up'
-import MdiWeb from '~icons/mdi/web'
-import MdiCellphone from '~icons/mdi/cellphone'
-import MdiWorld from '~icons/mdi/world'
+import CellMetaDescription from '../components/Cell/CellMetaDescription.vue'
+import CellNetworkRequests from '../components/Cell/CellNetworkRequests.vue'
+import CellScreenshotThumbnails from '../components/Cell/CellScreenshotThumbnails.vue'
+import CellTapTargets from '../components/Cell/CellTapTargets.vue'
+import CellWebVitals from '../components/Cell/CellWebVitals.vue'
+
+function startCase(s: string) {
+  return s.replace(/[-_]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => w[0].toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
+}
+// Icon names for UIcon components
+const MdiAccessibility = 'i-mdi-accessibility'
+const MdiCellphone = 'i-mdi-cellphone'
+const MdiSpeedometer = 'i-mdi-speedometer'
+const MdiThumbUp = 'i-mdi-thumb-up'
+const MdiViewDashboard = 'i-mdi-view-dashboard'
+const MdiWeb = 'i-mdi-web'
+const MdiWorld = 'i-mdi-world'
 
 const {
   options: {
@@ -41,7 +49,42 @@ const {
 
 export const isStatic = window.__unlighthouse_static
 
-export { wsUrl, basePath, dynamicSampling, apiUrl, groupRoutesKey, lighthouseOptions, throttle, device }
+export function resolveArtifactPath(report: UnlighthouseRouteReport, file: string) {
+  if (!report?.artifactUrl) {
+    return '' // Return empty string for missing artifact URLs
+  }
+  const withoutBase = report.artifactUrl.replace(basePath, '')
+
+  if (isStatic) {
+    // Clean up the pathname to remove trailing /index.html and similar artifacts
+    let cleanPathname = window.location.pathname
+    // Remove common static file names that shouldn't be part of the base path
+    cleanPathname = cleanPathname.replace(/\/index\.html$/, '')
+
+    return joinURL(cleanPathname, withoutBase, file)
+  }
+
+  return joinURL(window.location.pathname, withoutBase, file) // dynamic base
+}
+
+/**
+ * Resolve a client-root-relative report file (e.g. a screenshot-thumbnail `data` path) to a URL.
+ *
+ * Lighthouse thumbnail paths are stored relative to the client root (`reports/.../x.jpeg`). Rendering
+ * them raw breaks when a static report is served from a sub-path without a trailing slash, since the
+ * browser resolves them against the parent directory. Prefixing the current pathname mirrors what
+ * `resolveArtifactPath` already does for the working full-page screenshot. (#275)
+ */
+export function resolveReportFileUrl(file: string) {
+  if (!file)
+    return ''
+  let pathname = window.location.pathname
+  if (isStatic)
+    pathname = pathname.replace(/\/index\.html$/, '')
+  return joinURL(pathname, file)
+}
+
+export { apiUrl, basePath, device, dynamicSampling, groupRoutesKey, lighthouseOptions, throttle, wsUrl }
 
 export const website = new $URL(site).origin
 

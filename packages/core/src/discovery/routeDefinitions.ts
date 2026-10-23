@@ -1,7 +1,8 @@
-import { join } from 'node:path'
 import type { RouteDefinition } from '../types'
-import { useUnlighthouse } from '../unlighthouse'
+import { glob } from 'node:fs/promises'
+import { join } from 'node:path'
 import { useLogger } from '../logger'
+import { useUnlighthouse } from '../unlighthouse'
 import { createRoutes } from '../util/createRoutes'
 
 /**
@@ -20,22 +21,15 @@ export async function discoverRouteDefinitions() {
   const dir = pagesDir === '' ? resolvedConfig.root.replace(`${resolvedConfig.root}/`, '') : pagesDir
 
   const resolveFiles = async (dir: string) => {
-    const { globby } = (await import('globby'))
+    const maxDepth = 5
+    const patterns = supportedExtensions.flatMap(extension =>
+      Array.from({ length: maxDepth + 1 }, (_, depth) => join(dir, ...(Array.from({ length: depth }).fill('*') as string[]), `*.${extension}`)),
+    )
 
-    // can't wrap single extension in {} within regex
-    const extensions = supportedExtensions.length > 1 ? `{${supportedExtensions.join(',')}}` : supportedExtensions[0]
-
-    return await globby([
-      join(dir, '**', `*.${extensions}`),
-      '!**/README.md',
-      '!**/node_modules',
-    ], {
+    return await Array.fromAsync(glob(patterns, {
       cwd: resolvedConfig.root,
-      // avoid some edge-cases
-      deep: 5,
-      // avoid scanning node_modules and any other expensive dirs
-      gitignore: true,
-    })
+      exclude: ['**/README.md', '**/node_modules/**'],
+    }))
   }
 
   const files: Record<string, string> = {}

@@ -1,5 +1,5 @@
-import { Cluster } from 'puppeteer-cluster'
 import type { UnlighthousePuppeteerCluster } from '../types'
+import { Cluster } from 'puppeteer-cluster'
 import { useUnlighthouse } from '../unlighthouse'
 
 /**
@@ -16,6 +16,7 @@ export async function launchPuppeteerCluster(): Promise<UnlighthousePuppeteerClu
   cluster.display = {
     log() {},
     resetCursor() {},
+    close() {},
   }
   return cluster
 }

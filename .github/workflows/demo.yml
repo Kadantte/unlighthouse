@@ -6,37 +6,35 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
 jobs:
   demo:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2.2.1
+      - uses: pnpm/action-setup@v6
 
-      - name: Use Node.js v18
-        uses: actions/setup-node@v2
+      - uses: actions/setup-node@v6
         with:
-          node-version: v18
+          node-version: 22.x
           registry-url: https://registry.npmjs.org/
           cache: pnpm
 
-      - name: Install Dependencies
-        run: pnpm install && pnpm add puppeteer
-
-      - name: PNPM build
-        run: pnpm run build
+      - run: pnpm i
+      - run: pnpm build
 
       - name: Run Unlighthouse CI
         run: pnpm ci:docs && mv .unlighthouse dist
         env:
-          NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Deploy to Netlify
-        uses: nwtgck/actions-netlify@v1.2
+        uses: nwtgck/actions-netlify@v3.0
         with:
           publish-dir: ./dist
           production-branch: main

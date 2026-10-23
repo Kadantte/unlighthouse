@@ -1,7 +1,7 @@
 {
   "name": "@unlighthouse/core",
   "type": "module",
-  "version": "0.13.1",
+  "version": "0.19.1",
   "description": "Scan your entire website with Google Lighthouse.",
   "license": "MIT",
   "homepage": "https://github.com/harlan-zw/unlighthouse#readme",
@@ -23,21 +23,24 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     }
   },
-  "main": "dist/index.cjs",
+  "main": "dist/index.mjs",
   "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "types": "dist/index.d.mts",
   "files": [
     "*.d.ts",
     "dist"
   ],
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
-    "build": "unbuild",
-    "stub": "unbuild --stub"
+    "build": "obuild",
+    "stub": "obuild --stub",
+    "test:attw": "attw --pack"
   },
   "peerDependenciesMeta": {
     "puppeteer": {
@@ -45,49 +48,35 @@
     }
   },
   "dependencies": {
-    "@puppeteer/browsers": "^2.2.3",
-    "@unlighthouse/client": "workspace:../client",
-    "@unrouted/core": "^0.6.0",
-    "@unrouted/fetch": "^0.6.0",
-    "@unrouted/plugins": "^0.6.0",
-    "@unrouted/preset-api": "^0.6.0",
-    "@unrouted/preset-node": "^0.6.0",
-    "axios": "^1.7.2",
-    "boxen": "^7.1.1",
-    "chalk": "^5.3.0",
-    "cheerio": "1.0.0-rc.12",
-    "chrome-launcher": "^1.1.2",
-    "consola": "^3.2.3",
-    "defu": "^6.1.4",
-    "execa": "^8.0.1",
-    "fs-extra": "^11.2.0",
-    "globby": "^14.0.1",
-    "h3": "^1.11.1",
-    "hookable": "^5.5.3",
-    "launch-editor": "^2.6.1",
-    "lighthouse": "^12.0.0",
-    "lodash-es": "^4.17.21",
-    "minimist": "^1.2.8",
-    "mlly": "^1.7.1",
-    "object-hash": "^3.0.0",
-    "ofetch": "^1.3.4",
-    "pathe": "^1.1.2",
-    "puppeteer-cluster": "^0.24.0",
-    "puppeteer-core": "^22.11.0",
-    "regexparam": "^3.0.0",
-    "sanitize-filename": "^1.6.3",
-    "sitemapper": "^3.2.8",
-    "slugify": "^1.6.6",
-    "ufo": "^1.5.3",
-    "unconfig": "^0.4.4",
-    "unctx": "^2.3.1",
-    "wrap-ansi": "^9.0.0",
-    "ws": "^8.17.0"
+    "@clack/prompts": "catalog:dependencies",
+    "@puppeteer/browsers": "catalog:dependencies",
+    "@unlighthouse/client": "workspace:*",
+    "c12": "catalog:dependencies",
+    "chrome-launcher": "catalog:dependencies",
+    "consola": "catalog:dependencies",
+    "defu": "catalog:dependencies",
+    "h3": "catalog:dependencies",
+    "hookable": "catalog:dependencies",
+    "launch-editor": "catalog:dependencies",
+    "lighthouse": "catalog:dependencies",
+    "lodash-es": "catalog:dependencies",
+    "ofetch": "catalog:dependencies",
+    "pathe": "catalog:dependencies",
+    "puppeteer-cluster": "catalog:dependencies",
+    "puppeteer-core": "catalog:dependencies",
+    "radix3": "catalog:dependencies",
+    "regexparam": "catalog:dependencies",
+    "sanitize-filename": "catalog:dependencies",
+    "sitemapper": "catalog:dependencies",
+    "slugify": "catalog:dependencies",
+    "tinyexec": "catalog:dependencies",
+    "ufo": "catalog:dependencies",
+    "ultrahtml": "catalog:dependencies",
+    "unctx": "catalog:dependencies",
+    "ws": "catalog:dependencies"
   },
   "devDependencies": {
-    "@types/fs-extra": "^11.0.4",
-    "@types/lodash-es": "^4.17.12",
-    "@types/object-hash": "^3.0.6",
-    "@types/ws": "^8.5.10"
+    "@types/lodash-es": "catalog:",
+    "@types/ws": "catalog:"
   }
 }

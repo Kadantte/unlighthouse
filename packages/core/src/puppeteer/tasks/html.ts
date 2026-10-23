@@ -1,17 +1,19 @@
-import { join } from 'node:path'
-import fs from 'fs-extra'
-import type { CheerioAPI } from 'cheerio'
-import cheerio from 'cheerio'
-import type { Page } from 'puppeteer-core'
-import { withoutTrailingSlash } from 'ufo'
 import type { HTMLExtractPayload, PuppeteerTask } from '../../types'
-import { useUnlighthouse } from '../../unlighthouse'
+import type { Page } from '../../types/puppeteer'
+import { Buffer } from 'node:buffer'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { withoutTrailingSlash } from 'ufo'
+import { parse, render, walk } from 'ultrahtml'
 import { useLogger } from '../../logger'
-import { ReportArtifacts, fetchUrlRaw, trimSlashes } from '../../util'
 import { normaliseRoute } from '../../router'
+import { useUnlighthouse } from '../../unlighthouse'
+import { fetchUrlRaw, ReportArtifacts } from '../../util'
+import { isImplicitOrExplicitHtml } from '../../util/filter'
 import { setupPage } from '../util'
 
 export const extractHtmlPayload: (page: Page, route: string) => Promise<{ success: boolean, redirected?: false | string, message?: string, payload?: string }> = async (page, route) => {
+// ... (rest of extractHtmlPayload remains the same)
   const { worker, resolvedConfig } = useUnlighthouse()
 
   // if we don't need to execute any javascript we can do a less expensive fetch of the URL
@@ -24,10 +26,31 @@ export const extractHtmlPayload: (page: Page, route: string) => Promise<{ succes
     if (response.headers['content-type'] && !response.headers['content-type'].includes('text/html'))
       return { success: false, message: `Non-HTML Content-Type header: ${response.headers['content-type']}.` }
 
+    // ensure we have valid HTML content
+    let htmlContent: string
+    if (typeof response.data === 'string') {
+      htmlContent = response.data
+    }
+    else if (Buffer.isBuffer(response.data)) {
+      htmlContent = response.data.toString('utf-8')
+    }
+    else if (response.data && typeof response.data === 'object') {
+      // if it's JSON or another object, convert to string
+      htmlContent = JSON.stringify(response.data)
+    }
+    else {
+      htmlContent = String(response.data || '')
+    }
+
+    // basic validation that we have some content
+    if (!htmlContent.trim()) {
+      return { success: false, message: `Empty response from URL ${route}.` }
+    }
+
     return {
       success: true,
       redirected: redirected ? redirectUrl : false,
-      payload: response.data,
+      payload: htmlContent,
     }
   }
   // get page html content
@@ -80,30 +103,78 @@ export const extractHtmlPayload: (page: Page, route: string) => Promise<{ succes
   }
 }
 
-export function processSeoMeta($: CheerioAPI): HTMLExtractPayload {
-  return {
-    alternativeLangDefault: $('link[hreflang="x-default"]').attr('href'),
-    favicon: $('link[rel~="icon"]').attr('href') || '/favicon.ico',
-    title: $('meta[name=\'title\'], head > title').text(),
-    description: $('meta[name=\'description\']').attr('content'),
-    og: {
-      image: $('meta[property=\'og:image\'], meta[name=\'og:image\']').attr('content'),
-      description: $('meta[property=\'og:description\'], meta[name=\'og:description\']').attr('content'),
-      title: $('meta[property=\'og:title\'], meta[name=\'og:title\']').attr('content'),
-    },
+export async function processHtml(html: string, site: string): Promise<{ seo: HTMLExtractPayload, internalLinks: string[], externalLinks: string[] }> {
+  const seo: HTMLExtractPayload = {
+    favicon: '/favicon.ico',
+    og: {},
+    internalLinks: 0,
+    externalLinks: 0,
+    htmlSize: html.length,
   }
+  const internalLinks: string[] = []
+  const externalLinks: string[] = []
+
+  const ast = parse(html)
+  await walk(ast, async (node) => {
+    if (node.type === 1) { // ELEMENT_NODE
+      if (node.name === 'link') {
+        const rel = node.attributes?.rel
+        const hreflang = node.attributes?.hreflang
+        const href = node.attributes?.href
+        if (hreflang === 'x-default' && href) {
+          seo.alternativeLangDefault = href
+          seo.alternativeLangDefaultHtml = await render(node)
+        }
+        if (rel && rel.includes('icon') && href) {
+          seo.favicon = href
+        }
+      }
+      else if (node.name === 'meta') {
+        const name = node.attributes?.name
+        const property = node.attributes?.property
+        const content = node.attributes?.content
+        if (name === 'title' && content)
+          seo.title = content
+        if (name === 'description' && content)
+          seo.description = content
+        if (property === 'og:image' || name === 'og:image')
+          seo.og!.image = content
+        if (property === 'og:description' || name === 'og:description')
+          seo.og!.description = content
+        if (property === 'og:title' || name === 'og:title')
+          seo.og!.title = content
+      }
+      else if (node.name === 'title') {
+        if (!seo.title && node.children?.[0]?.type === 2)
+          seo.title = node.children[0].value
+      }
+      else if (node.name === 'a') {
+        const href = node.attributes?.href
+        if (href && !href.includes('javascript:') && !href.includes('mailto:') && !href.startsWith('#') && isImplicitOrExplicitHtml(href)) {
+          if ((href.startsWith('/') && !href.startsWith('//')) || href.includes(site))
+            internalLinks.push(href)
+          else
+            externalLinks.push(href)
+        }
+      }
+    }
+  })
+  seo.internalLinks = internalLinks.length
+  seo.externalLinks = externalLinks.length
+  return { seo, internalLinks, externalLinks }
 }
 
 export const inspectHtmlTask: PuppeteerTask = async (props) => {
-  const { resolvedConfig, hooks, runtimeSettings } = useUnlighthouse()
+  const unlighthouse = useUnlighthouse()
+  const { resolvedConfig, hooks, runtimeSettings } = unlighthouse
   const { page, data: routeReport } = props
   const logger = useLogger()
   let html: string
 
   // basic caching based on saving html payloads
   const htmlPayloadPath = join(routeReport.artifactPath, ReportArtifacts.html)
-  if (resolvedConfig.cache && fs.existsSync(htmlPayloadPath)) {
-    html = fs.readFileSync(htmlPayloadPath, { encoding: 'utf-8' })
+  if (resolvedConfig.cache && existsSync(htmlPayloadPath)) {
+    html = readFileSync(htmlPayloadPath, { encoding: 'utf-8' })
     logger.debug(`Running \`inspectHtmlTask\` for \`${routeReport.route.path}\` using cache.`)
   }
   else {
@@ -126,57 +197,56 @@ export const inspectHtmlTask: PuppeteerTask = async (props) => {
         return routeReport
       }
       // ignore redirect from site to site/
-      if (withoutTrailingSlash(response.redirected) !== runtimeSettings.siteUrl.href)
+      if (withoutTrailingSlash(response.redirected) !== withoutTrailingSlash(runtimeSettings.siteUrl.href))
         logger.info('Redirected url detected, this may cause issues in the final report.', response.redirected)
 
       // check if redirect url is already queued, if so we bail on this route
     }
 
-    html = response.payload
+    html = typeof response.payload === 'string' ? response.payload : String(response.payload || '')
   }
 
-  const $ = cheerio.load(html)
-  routeReport.seo = processSeoMeta($)
+  const { seo, internalLinks } = await processHtml(html, resolvedConfig.site)
+
+  routeReport.seo = seo
   if (resolvedConfig.scanner.ignoreI18nPages && routeReport.seo.alternativeLangDefault && withoutTrailingSlash(routeReport.route.url) !== withoutTrailingSlash(routeReport.seo.alternativeLangDefault)) {
-    routeReport.tasks.inspectHtmlTask = 'ignore'
-    logger.debug(`Page has an alternative lang, ignoring \`${routeReport.route.path}\`: ${routeReport.seo.alternativeLangDefault}`)
-    // make sure we queue the default, this fixes issues with if the home page has a default lang that is alternative
-    const unlighthouse = useUnlighthouse()
-    unlighthouse.worker.queueRoute(normaliseRoute(routeReport.seo.alternativeLangDefault))
-    return routeReport
-  }
-  const internalLinks: string[] = []
-  const externalLinks: string[] = []
-  $('a').each(function () {
-    const href = $(this).attr('href')
-    // href must be provided and not be javascript
-    if (!href || href.includes('javascript:') || href.includes('mailto:') || href === '#')
-      return
-
-    // if the URL doesn't end with a slash we may be dealing with a file
-    if (!href.endsWith('/')) {
-      // need to check for a dot, meaning a file
-      const parts = href.split('.')
-      // 1 part means there is no extension, or no dot in the url
-      if (parts.length > 1) {
-        // presumably the last part will be the extension
-        const extension = trimSlashes(parts[parts.length - 1]).replace('.', '')
-        if (extension !== 'html')
-          return
+    // If this is the root path with cross-domain hreflang, disable ignoreI18nPages to prevent all routes from being ignored
+    if (routeReport.route.path === '/') {
+      try {
+        const altUrl = new URL(routeReport.seo.alternativeLangDefault)
+        const siteUrl = new URL(resolvedConfig.site)
+        if (altUrl.origin !== siteUrl.origin) {
+          logger.warn(`Root path (/) has cross-domain hreflang alternative. Automatically disabling \`ignoreI18nPages\` to prevent all routes from being ignored. Alternative: ${routeReport.seo.alternativeLangDefault}`)
+          resolvedConfig.scanner.ignoreI18nPages = false
+        }
       }
+      catch {}
     }
-    if ((href.startsWith('/') && !href.startsWith('//')) || href.includes(resolvedConfig.site))
-      internalLinks.push(href)
-    else
-      externalLinks.push(href)
-  })
+
+    // Only ignore if ignoreI18nPages is still enabled (wasn't disabled above)
+    if (resolvedConfig.scanner.ignoreI18nPages) {
+      routeReport.tasks.inspectHtmlTask = 'ignore'
+      const newRoute = normaliseRoute(routeReport.seo.alternativeLangDefault)
+      const htmlTag = routeReport.seo.alternativeLangDefaultHtml || ''
+      const baseMessage = `Page has a default alternative language ${htmlTag}, ignoring \`${routeReport.route.path}\` and queueing \`${newRoute}\`.`
+
+      if (!unlighthouse._i18nWarn) {
+        unlighthouse._i18nWarn = true
+        logger.warn(`${baseMessage}\nTo scan this page, set \`scanner.ignoreI18nPages = false\` or update --site parameter to match the hreflang origin. Future warnings will be suppressed.`)
+      }
+      else {
+        logger.debug(baseMessage)
+      }
+      // make sure we queue the default, this fixes issues with if the home page has a default lang that is alternative
+      unlighthouse.worker.queueRoute(normaliseRoute(routeReport.seo.alternativeLangDefault))
+      return routeReport
+    }
+  }
+
   await hooks.callHook('discovered-internal-links', routeReport.route.path, internalLinks)
-  routeReport.seo.internalLinks = internalLinks.length
-  routeReport.seo.externalLinks = externalLinks.length
-  routeReport.seo.htmlSize = html.length
 
   // only need the html payload for caching purposes, unlike the lighthouse reports
   if (resolvedConfig.cache)
-    fs.writeFileSync(htmlPayloadPath, html)
+    writeFileSync(htmlPayloadPath, html)
   return routeReport
 }

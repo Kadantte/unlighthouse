@@ -1,20 +1,5 @@
-import { isAbsolute, join } from 'node:path'
-import { existsSync } from 'node:fs'
 import type { IncomingMessage } from 'node:http'
 import type { Socket } from 'node:net'
-import fs from 'fs-extra'
-import { $URL, joinURL } from 'ufo'
-import { createContext } from 'unctx'
-import { createHooks } from 'hookable'
-import { loadConfig } from 'unconfig'
-import { defu } from 'defu'
-import objectHash from 'object-hash'
-import { createCommonJS, resolvePath } from 'mlly'
-import { $fetch } from 'ofetch'
-import chalk from 'chalk'
-import { version } from '../package.json'
-import { WS, createApi, createBroadcastingEvents, createMockRouter } from './router'
-import { createUnlighthouseWorker, inspectHtmlTask, runLighthouseTask } from './puppeteer'
 import type {
   Provider,
   ResolvedUserConfig,
@@ -23,13 +8,29 @@ import type {
   UnlighthouseHooks,
   UserConfig,
 } from './types'
+import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { isAbsolute, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { loadConfig } from 'c12'
+import { colorize } from 'consola/utils'
+import { defu } from 'defu'
+import { createHooks } from 'hookable'
+import { $fetch } from 'ofetch'
+import { $URL, joinURL } from 'ufo'
+import { createContext } from 'unctx'
+import { version } from '../package.json'
 import { generateClient } from './build'
-import { discoverRouteDefinitions, resolveReportableRoutes } from './discovery'
-import { resolveUserConfig } from './resolveConfig'
 import { AppName, ClientPkg } from './constants'
+import { discoverRouteDefinitions, resolveReportableRoutes } from './discovery'
 import { createLogger } from './logger'
+import { createUnlighthouseWorker, inspectHtmlTask, runLighthouseTask } from './puppeteer'
+import { resolveUserConfig } from './resolveConfig'
+import { createApi, createBroadcastingEvents, createMockRouter, WS } from './router'
 import { normaliseHost } from './util'
 import { successBox } from './util/cliFormatting'
+import { prepareOutputDir } from './util/outputDir'
+import { isNewerVersion } from './util/version'
 
 const engineContext = createContext<UnlighthouseContext>()
 
@@ -41,7 +42,7 @@ export const useUnlighthouse = engineContext.tryUse as () => UnlighthouseContext
 
 /**
  * A simple define wrapper to provide typings to config definitions.
- * @param config
+ * @deprecated Use `defineUnlighthouseConfig` from `unlighthouse/config` instead.
  */
 export function defineConfig(config: UserConfig) {
   return config
@@ -52,61 +53,52 @@ export function defineConfig(config: UserConfig) {
  * not start automatically, a server context needs to be provided using `setServerContext()`.
  *
  * @param userConfig
- * @param provider
+ * @param provider Integration details. Defaults to none, which discovers routes from the site.
  */
-export async function createUnlighthouse(userConfig: UserConfig, provider?: Provider) {
+export async function createUnlighthouse(userConfig: UserConfig, provider: Provider = {}) {
   const logger = createLogger(userConfig.debug)
-  const { __dirname } = createCommonJS(import.meta.url)
   if (userConfig.root && !isAbsolute(userConfig.root))
     userConfig.root = join(process.cwd(), userConfig.root)
   else if (!userConfig.root)
     userConfig.root = process.cwd()
 
   logger.debug(`Starting Unlighthouse at root: \`${userConfig.root}\` cwd: ${process.cwd()}`)
-  let configFile: string | null = null
+  // resolve configFile to absolute before passing to c12
+  if (userConfig.configFile && !isAbsolute(userConfig.configFile))
+    userConfig.configFile = join(process.cwd(), userConfig.configFile)
   // support loading configuration files
-  const configDefinition = await loadConfig<UserConfig>({
+  ;(globalThis as any).defineUnlighthouseConfig = (c: any) => c
+  // c12 echoes the requested name in `configFile` even when no file exists; `_configFile` is set only for a real file
+  const { _configFile: configFile, config } = await loadConfig<UserConfig>({
+    name: 'unlighthouse',
     cwd: userConfig.root,
-    sources: [
-      {
-        files: [
-          'unlighthouse.config',
-          // may provide the config file as an argument
-          ...(userConfig.configFile ? [userConfig.configFile] : []),
-        ],
-        // default extensions
-        extensions: ['ts', 'js', 'mjs', 'cjs', 'json', ''],
-      },
-    ],
+    configFile: userConfig.configFile || 'unlighthouse.config',
+    dotenv: true,
   })
-  logger.debug('Discovered config definition', configDefinition)
-
-  if (configDefinition.sources?.[0]) {
-    configFile = configDefinition.sources[0]
-    // @ts-expect-error fixes issue with default being returned for mjs loads
-    const config = configDefinition.config?.default || configDefinition.config
-    // @ts-ignore broken types
-    userConfig = defu(config, userConfig)
-  }
+  delete (globalThis as any).defineUnlighthouseConfig
+  logger.debug('Discovered config definition', config)
+  userConfig = defu(userConfig, config)
   const runtimeSettings: { moduleWorkingDir: string, lighthouseProcessPath: string } & Partial<RuntimeSettings> = {
     configFile: configFile || undefined,
-    moduleWorkingDir: __dirname,
+    moduleWorkingDir: import.meta.dirname,
     configCacheKey: '',
     lighthouseProcessPath: '',
   }
   // path to the lighthouse worker file
-  runtimeSettings.lighthouseProcessPath = await resolvePath(
-    join(runtimeSettings.moduleWorkingDir, 'process', 'lighthouse.mjs'),
-  ).catch(() => '')
-  // ts module in stub mode, not sure why extensions won't resolve
-  if (!(await fs.pathExists(runtimeSettings.lighthouseProcessPath))) {
-    runtimeSettings.lighthouseProcessPath = await resolvePath(
-      join(runtimeSettings.moduleWorkingDir, 'process', 'lighthouse.ts'),
-    )
+  const mjsPath = join(runtimeSettings.moduleWorkingDir, 'lighthouse.mjs')
+  if (existsSync(mjsPath)) {
+    runtimeSettings.lighthouseProcessPath = mjsPath
+  }
+  else {
+    // ts module in stub mode
+    runtimeSettings.lighthouseProcessPath = join(runtimeSettings.moduleWorkingDir, 'lighthouse.ts')
   }
 
   // create a cache key for the users provided key so we can cache burst on config update
-  runtimeSettings.configCacheKey = objectHash({ ...userConfig, version }).substring(0, 4)
+  runtimeSettings.configCacheKey = createHash('md5')
+    .update(JSON.stringify({ ...userConfig, version }))
+    .digest('hex')
+    .substring(0, 4)
 
   const resolvedConfig = await resolveUserConfig(userConfig)
   logger.debug('Post config resolution', resolvedConfig)
@@ -120,7 +112,7 @@ export async function createUnlighthouse(userConfig: UserConfig, provider?: Prov
   await hooks.callHook('resolved-config', resolvedConfig)
 
   if (configFile)
-    logger.info(`Creating Unlighthouse ${configFile ? `using config from \`${configFile}\`` : ''}`)
+    logger.info(`Creating Unlighthouse using config from \`${configFile}\``)
 
   // web socket instance for broadcasting
   const ws = provider?.name === 'ci' ? null : new WS()
@@ -139,7 +131,6 @@ export async function createUnlighthouse(userConfig: UserConfig, provider?: Prov
     runLighthouseTask,
   }
 
-  // @ts-ignore broken types
   const worker = await createUnlighthouseWorker(tasks)
 
   if (resolvedConfig.hooks?.authenticate) {
@@ -158,7 +149,7 @@ export async function createUnlighthouse(userConfig: UserConfig, provider?: Prov
             json[key] = localStorage.getItem(key)
         }
         return json
-      }).catch((e) => {
+      }).catch((e: any) => {
         logger.warn('Failed to collect authentication localStorage.\n', e)
         return {}
       })
@@ -170,7 +161,7 @@ export async function createUnlighthouse(userConfig: UserConfig, provider?: Prov
             json[key] = sessionStorage.getItem(key)
         }
         return json
-      }).catch((e) => {
+      }).catch((e: any) => {
         logger.warn('Failed to collect authentication sessionStorage.\n', e)
         return {}
       })
@@ -191,43 +182,26 @@ export async function createUnlighthouse(userConfig: UserConfig, provider?: Prov
 
     logger.debug(`Setting Unlighthouse CI Context [Site: ${$site}]`)
 
-    // avoid nesting reports for ci mode
-    let outputPath = join(
-      resolvedConfig.outputPath,
-      // fix windows not supporting : in paths
-      $site.hostname.replace(':', '꞉'),
-      runtimeSettings.configCacheKey || '',
-    )
-
-    try {
-      await fs.mkdir(resolvedConfig.outputPath, { recursive: true })
-    }
-    catch (e) {
-      logger.error(`Failed to create output directory. Please check unlighthouse has permissions to: ${resolvedConfig.outputPath}`, e)
-    }
-
-    try {
-      await fs.mkdir(outputPath, { recursive: true })
-    }
-    catch (e) {
-      logger.error(`Failed to create output directory. Please check unlighthouse has permission to create files and folders in: ${resolvedConfig.outputPath}`, e)
-    }
-
-    if (provider?.name === 'ci')
-      outputPath = resolvedConfig.outputPath
+    // ci mode writes straight into the output path, other providers nest reports by host and config
+    const outputPath = provider?.name === 'ci'
+      ? resolvedConfig.outputPath
+      : join(
+          resolvedConfig.outputPath,
+          // fix windows not supporting : in paths
+          $site.hostname.replace(':', '꞉'),
+          runtimeSettings.configCacheKey || '',
+        )
 
     ctx.runtimeSettings = {
       ...ctx.runtimeSettings,
       outputPath,
       generatedClientPath: outputPath,
-      resolvedClientPath: await resolvePath(ClientPkg, { url: import.meta.url }),
+      resolvedClientPath: fileURLToPath(import.meta.resolve(ClientPkg)),
     }
 
-    if (!resolvedConfig.cache && existsSync(resolvedConfig.outputPath)) {
-      logger.debug(`\`cache\` is disabled, deleting cache folder: \`${resolvedConfig.outputPath}\``)
-      fs.rmSync(outputPath, { recursive: true })
-    }
-    fs.ensureDirSync(ctx.runtimeSettings.outputPath)
+    if (!resolvedConfig.cache)
+      logger.debug(`\`cache\` is disabled, clearing output folder: \`${outputPath}\``)
+    await prepareOutputDir(outputPath, { clear: !resolvedConfig.cache, root: resolvedConfig.root })
     return ctx
   }
 
@@ -264,7 +238,7 @@ export async function createUnlighthouse(userConfig: UserConfig, provider?: Prov
       ...ctx.runtimeSettings,
       apiPath,
       server,
-      resolvedClientPath: await resolvePath(ClientPkg, { url: import.meta.url }),
+      resolvedClientPath: fileURLToPath(import.meta.resolve(ClientPkg)),
       clientUrl,
       apiUrl: joinURL($server.toString(), apiPath),
       websocketUrl: `ws://${joinURL($server.host, apiPath, '/ws')}`,
@@ -278,16 +252,9 @@ export async function createUnlighthouse(userConfig: UserConfig, provider?: Prov
       })
     }
 
-    if (!resolvedConfig.cache && existsSync(ctx.runtimeSettings.outputPath)) {
-      logger.debug(`\`cache\` is disabled, deleting cache folder: \`${ctx.runtimeSettings.outputPath}\``)
-      try {
-        fs.rmSync(ctx.runtimeSettings.outputPath, { recursive: true })
-      }
-      catch (e) {
-        logger.debug(`Failed to delete cache folder: \`${ctx.runtimeSettings.outputPath}\``, e)
-      }
-    }
-    fs.ensureDirSync(ctx.runtimeSettings.outputPath)
+    if (!resolvedConfig.cache)
+      logger.debug(`\`cache\` is disabled, clearing output folder: \`${ctx.runtimeSettings.outputPath}\``)
+    await prepareOutputDir(ctx.runtimeSettings.outputPath, { clear: !resolvedConfig.cache, root: resolvedConfig.root })
     await generateClient()
 
     if (provider?.name !== 'cli') {
@@ -325,11 +292,11 @@ export async function createUnlighthouse(userConfig: UserConfig, provider?: Prov
     ctx.routes = await resolveReportableRoutes()
     logger.debug('Resolved reportable routes', ctx.routes.length)
     createBroadcastingEvents()
-    worker.queueRoutes(ctx.routes)
 
+    // Show the static info box first (before any progress starts)
     if (provider?.name !== 'ci') {
       // fancy CLI banner when we start
-      const label = (name: string) => chalk.bold.magenta(`▸ ${name}:`)
+      const label = (name: string) => colorize('bold', colorize('magenta', (`▸ ${name}:`)))
       let mode = ''
       if (resolvedConfig.urls?.length)
         mode = 'Manual'
@@ -344,24 +311,22 @@ export async function createUnlighthouse(userConfig: UserConfig, provider?: Prov
       try {
         latestTag = (await $fetch<any>('https://ungh.unjs.io/repos/harlan-zw/unlighthouse/releases/latest')).release.tag
       }
-      catch (e) {}
+      catch {}
 
       const title = [
-        `⛵  ${chalk.bold.blueBright(AppName)} ${chalk.dim(`${provider?.name} @ v${version}`)}`,
+        `⛵\u200D  ${colorize('bold', colorize('blueBright', AppName))} ${colorize('dim', `${provider?.name} @ v${version}`)}`,
       ]
-      if (Number(latestTag.replace('v', '').replace('.', '')) > Number(version.replace('.', ''))) {
+      if (isNewerVersion(latestTag, version)) {
         title.push(...[
           '',
           `🎉 New version ${latestTag} available! Use the latest:`,
-          chalk.gray(` > ${chalk.underline(`npx unlighthouse@^${latestTag} --site ${resolvedConfig.site}`)}`),
+          colorize('gray', ` > ${colorize('underline', `npx unlighthouse@^${latestTag} --site ${resolvedConfig.site}`)}`),
         ])
       }
       title.push(...[
         '',
         `${label('Scanning')} ${resolvedConfig.site}`,
-        `${label('Route Discovery')} ${mode} ${ctx.routes.length > 1 ? (chalk.dim(`${ctx.routes.length} initial URLs`)) : ''}`,
-        '',
-        chalk.dim(' 💖 Like Unlighthouse? Support the development: https://github.com/sponsors/harlan-zw'),
+        `${label('Route Discovery')} ${mode} ${ctx.routes.length > 1 ? (colorize('dim', (`${ctx.routes.length} initial URLs`))) : ''}`,
       ])
       if (ctx.routeDefinitions?.length)
         title.push(`${label('Route Definitions')} ${ctx.routeDefinitions.length}`)
@@ -369,13 +334,19 @@ export async function createUnlighthouse(userConfig: UserConfig, provider?: Prov
       process.stdout.write(successBox(
         // messages
         [
-          ctx.runtimeSettings.clientUrl ? chalk.whiteBright(`Report: ${ctx.runtimeSettings.clientUrl}`) : '',
+          ctx.runtimeSettings.clientUrl ? colorize('whiteBright', `Report: ${ctx.runtimeSettings.clientUrl}`) : '',
         ].join('\n'),
         // title
         title.join('\n'),
       ))
       if (existsSync(join(ctx.runtimeSettings.generatedClientPath, 'reports', 'lighthouse.json')) && ctx.resolvedConfig.cache)
-        logger.info(`Restoring reports from cache. ${chalk.gray('You can disable this behavior by passing --no-cache.')}`)
+        logger.info(`Restoring reports from cache. ${colorize('gray', 'You can disable this behavior by passing --no-cache.')}`)
+    }
+
+    // Now start queuing routes after the static info is shown
+    worker.queueRoutes(ctx.routes)
+    if (ctx.routes.length && !worker.reports().length) {
+      logger.error(`No routes left to scan. Discovery found ${ctx.routes.length} route(s), and include, exclude, or robots.txt rules skipped all of them. The crawler starts from \`/\`, so keep \`/\` in \`scanner.include\` or pass explicit \`urls\`.`)
     }
     return ctx
   }

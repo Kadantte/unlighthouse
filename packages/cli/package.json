@@ -1,21 +1,25 @@
 {
   "name": "@unlighthouse/cli",
   "type": "module",
-  "version": "0.13.1",
+  "version": "0.19.1",
   "description": "CLI for Unlighthouse",
   "license": "MIT",
   "homepage": "https://github.com/harlan-zw/unlighthouse#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/harlan-zw/unlighthouse.git",
-    "directory": "packages/core"
+    "directory": "packages/cli"
   },
   "bugs": {
     "url": "https://github.com/harlan-zw/unlighthouse/issues"
   },
   "keywords": [
-    "unlighthouse",
-    "cli"
+    "lighthouse",
+    "audit",
+    "seo",
+    "performance",
+    "cli",
+    "unlighthouse"
   ],
   "sideEffects": false,
   "exports": {
@@ -29,28 +33,31 @@
   "main": "dist/cli.mjs",
   "module": "dist/cli.mjs",
   "bin": {
-    "unlighthouse-ci": "bin/unlighthouse-ci.cjs"
+    "unlighthouse-ci": "bin/unlighthouse-ci.mjs"
   },
   "files": [
     "*.d.ts",
+    "bin",
     "dist"
   ],
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
-    "build": "unbuild",
-    "stub": "unbuild --stub"
+    "build": "obuild",
+    "stub": "obuild --stub"
   },
   "dependencies": {
-    "@lhci/utils": "^0.13.0",
-    "@unlighthouse/core": "workspace:../core",
-    "@unlighthouse/server": "workspace:../server",
-    "better-opn": "^3.0.2",
-    "cac": "^6.7.14",
-    "consola": "^3.2.3",
-    "defu": "^6.1.4",
-    "fs-extra": "^11.2.0",
-    "globby": "^14.0.1",
-    "lodash-es": "^4.17.21",
-    "pathe": "^1.1.2",
-    "std-env": "^3.7.0"
+    "@lhci/utils": "catalog:dependencies",
+    "@unlighthouse/client": "workspace:*",
+    "@unlighthouse/core": "workspace:*",
+    "@unlighthouse/server": "workspace:*",
+    "cac": "catalog:dependencies",
+    "consola": "catalog:dependencies",
+    "defu": "catalog:dependencies",
+    "lodash-es": "catalog:dependencies",
+    "pathe": "catalog:dependencies",
+    "std-env": "catalog:dependencies",
+    "tinyexec": "catalog:dependencies"
   }
 }

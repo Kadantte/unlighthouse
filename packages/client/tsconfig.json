@@ -1,0 +1,33 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "module": "esnext",
+    "paths": {
+      "@/*": ["./src/*"],
+      "~/*": ["./src/*"],
+      "@unlighthouse/core": ["../core/src"],
+      "@unlighthouse/core/src": ["../core/src"],
+      "#build/ui": [
+        "./node_modules/@nuxt/ui/.nuxt/ui"
+      ]
+    },
+    "types": [
+      "vite/client",
+      "unplugin-vue-components/vite"
+    ]
+  },
+  "include": [
+    "*.ts",
+    "*.vue",
+    "**/*.ts",
+    "**/*.vue",
+    "**/*.d.ts",
+    "auto-imports.d.ts",
+    "components.d.ts"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules"
+  ]
+}

@@ -1,13 +1,14 @@
 {
   "name": "unlighthouse",
   "type": "module",
-  "version": "0.13.1",
+  "version": "0.19.1",
   "description": "Delightfully scan your entire website with Google Lighthouse. Navigate your performance, accessibility and SEO.",
   "license": "MIT",
   "homepage": "https://github.com/harlan-zw/unlighthouse#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/harlan-zw/unlighthouse.git"
+    "url": "git+https://github.com/harlan-zw/unlighthouse.git",
+    "directory": "packages/unlighthouse"
   },
   "bugs": {
     "url": "https://github.com/harlan-zw/unlighthouse/issues"
@@ -22,28 +23,40 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs"
-    }
+      "types": "./types.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./config": {
+      "types": {
+        "import": "./config.d.mts",
+        "default": "./config.d.ts"
+      },
+      "import": "./config.mjs"
+    },
+    "./package.json": "./package.json"
   },
-  "main": "dist/index.cjs",
-  "module": "dist/index.mjs",
-  "types": "index.d.ts",
+  "main": "./dist/index.mjs",
+  "types": "./types.d.ts",
   "bin": {
-    "unlighthouse": "bin/unlighthouse.cjs",
-    "unlighthouse-ci": "bin/unlighthouse-ci.cjs"
+    "unlighthouse": "bin/unlighthouse.mjs",
+    "unlighthouse-ci": "bin/unlighthouse-ci.mjs"
   },
   "files": [
-    "*.d.ts",
-    "dist"
+    "config.d.mts",
+    "config.d.ts",
+    "config.mjs",
+    "dist",
+    "skills",
+    "types.d.mts",
+    "types.d.ts"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22.18.0"
   },
   "scripts": {
-    "build": "unbuild",
-    "stub": "unbuild --stub"
+    "build": "obuild",
+    "stub": "obuild --stub",
+    "test:attw": "attw --pack"
   },
   "peerDependenciesMeta": {
     "puppeteer": {
@@ -54,8 +67,9 @@
     }
   },
   "dependencies": {
-    "@unlighthouse/cli": "workspace:../cli",
-    "@unlighthouse/client": "workspace:../client",
-    "@unlighthouse/core": "workspace:../core"
+    "@unlighthouse/cli": "workspace:*",
+    "@unlighthouse/client": "workspace:*",
+    "@unlighthouse/core": "workspace:*",
+    "c12": "catalog:dependencies"
   }
 }

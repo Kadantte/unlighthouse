@@ -1,9 +1,9 @@
+import type { Hookable, NestedHooks } from 'hookable'
+import type { Flags, Result } from 'lighthouse'
 import type http from 'node:http'
 import type https from 'node:https'
+import type { LaunchOptions, Page } from 'puppeteer-core'
 import type { QueryObject } from 'ufo'
-import type { Flags, Result } from 'lighthouse'
-import type { Page, PuppeteerNodeLaunchOptions } from 'puppeteer-core'
-import type { Hookable, NestedHooks } from 'hookable'
 import type { Cluster, ClusterOptionsArgument, TaskFunction } from '../cluster'
 import type { WS } from './router'
 
@@ -54,6 +54,13 @@ export interface ComputedLighthouseReportAudit {
   displayValue: string | number
   score: number
 }
+export interface LighthouseReportCategory {
+  key: string
+  id: string
+  title: string
+  score: number | null
+}
+
 /**
  * An augmented Lighthouse Report type, we add custom types to the base report for specific functionality on the
  * @unlighthouse/client.
@@ -63,7 +70,10 @@ export type LighthouseReport = Partial<Result> & {
    * The total score for the result, this is the sum of each category's result
    */
   score: number
-  categories: { score: number | null }[]
+  /**
+   * One entry per Lighthouse category, in report order. `key` is the category id, such as `performance`.
+   */
+  categories: LighthouseReportCategory[]
   computed: {
     /**
      * An aggregation of multiple image audit results.
@@ -95,7 +105,7 @@ export interface UnlighthouseRouteReport {
   /**
    * Track how long tasks are taking
    */
-  tasksTime?: Record<Partial<UnlighthouseTask>, number>
+  tasksTime?: Partial<Record<UnlighthouseTask, number>>
   /**
    * Path to where the artifacts from a URL scan are saved.
    */
@@ -124,6 +134,7 @@ export interface UnlighthouseRouteReport {
 
 export interface HTMLExtractPayload {
   alternativeLangDefault?: string
+  alternativeLangDefaultHtml?: string
   title?: string
   description?: string
   internalLinks?: number
@@ -291,6 +302,12 @@ export interface ResolvedUserConfig {
    */
   extraHeaders: false | Record<string, string>
   /**
+   * The user agent to use for all requests. Uses default puppeteer / lighthouse user agent if not provided.
+   *
+   * @default false
+   */
+  userAgent?: string
+  /**
    * Query params to add to every request.
    *
    * @default false
@@ -309,7 +326,9 @@ export interface ResolvedUserConfig {
   /**
    * Where to emit lighthouse reports and the runtime client.
    *
-   * @default "./unlighthouse"
+   * Unlighthouse clears this folder before a scan without cache. It refuses to clear a folder that it did not create.
+   *
+   * @default "./.unlighthouse"
    */
   outputPath: string
   /**
@@ -347,7 +366,7 @@ export interface ResolvedUserConfig {
      * Provide a budget for each page as a numeric total score, or an object mapping the category to the score. Should be
      * a number between 1-100.
      */
-    budget: number | Record<Partial<LighthouseCategories>, number>
+    budget: number | Partial<Record<LighthouseCategories, number>>
     /**
      * Injects the required data into the client files, so it can be hosted statically.
      */
@@ -426,8 +445,10 @@ export interface ResolvedUserConfig {
     /**
      * Should lighthouse run with throttling enabled? This is an alias for manually configuring lighthouse.
      *
+     * Without an explicit value, local sites such as `localhost` run unthrottled.
+     *
      * @see https://unlighthouse.dev/guide/device.html#alias-enable-disable-throttling
-     * @default false
+     * @default true
      */
     throttle: boolean
     /**
@@ -442,7 +463,7 @@ export interface ResolvedUserConfig {
      * redundant route reports.
      *
      * @see https://unlighthouse.dev/guide/large-sites.html#change-dynamic-sampling-limit
-     * @default 5
+     * @default 8
      */
     dynamicSampling: number | false
     /**
@@ -464,6 +485,11 @@ export interface ResolvedUserConfig {
      * @default 'mobile'
      */
     device: 'mobile' | 'desktop' | false
+    /**
+     * Resolved robots.txt groups.
+     * @internal
+     */
+    _robotsTxtRules?: any
   }
   /**
    * Changes the default behaviour of lighthouse.
@@ -472,7 +498,7 @@ export interface ResolvedUserConfig {
   /**
    * Change the behaviour of puppeteer.
    */
-  puppeteerOptions: PuppeteerNodeLaunchOptions
+  puppeteerOptions: LaunchOptions
   /**
    * Change the behaviour of puppeteer-cluster.
    */
@@ -494,7 +520,7 @@ export interface ResolvedUserConfig {
     /**
      * When downloading the fallback which version of chrome should be used.
      *
-     * @default 1095492
+     * @default The Chrome version pinned by the installed `puppeteer-core`.
      */
     downloadFallbackVersion: string | number
     /**
@@ -509,7 +535,10 @@ export interface ResolvedUserConfig {
 export type ClientOptionsPayload = Pick<ResolvedUserConfig, 'client' | 'site' | 'lighthouseOptions' | 'scanner' | 'routerPrefix'>
   & Pick<RuntimeSettings, 'websocketUrl' | 'apiUrl'>
 
-export type DeepPartial<T> = T extends Function ? T : (T extends object ? { [P in keyof T]?: DeepPartial<T[P]>; } : T)
+type DeepPartial<T> = {
+  [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K]
+}
+
 export type UserConfig = DeepPartial<ResolvedUserConfig>
 
 export interface RuntimeSettings {
@@ -707,7 +736,10 @@ export interface UnlighthouseHooks {
    */
   'discovered-internal-links': (path: string, internalLinks: string[]) => HookResult
   /**
-   * After a page has been visited with puppeteer. Useful for running
+   * Fired before Lighthouse navigates the page to its URL.
+   *
+   * Unlighthouse re-applies the configured cookies, extra headers and user agent before it calls this hook.
+   * Use it to prepare the page. For example, intercept requests, inject a script, or seed extra state.
    * @param page
    */
   'puppeteer:before-goto': (page: Page) => HookResult
@@ -779,6 +811,11 @@ export interface UnlighthouseWorker {
    * Checks if the amount of routes scanned surpasses the `scanner.maxRoutes` value.
    */
   exceededMaxRoutes: () => boolean
+
+  /**
+   * Clear the progress display box
+   */
+  clearProgressDisplay: () => void
 }
 
 export interface ScanMeta {
@@ -871,4 +908,8 @@ export interface UnlighthouseContext {
    * Start the client and the queue worker. A server context must be provided before this function is called.
    */
   start: () => Promise<UnlighthouseContext>
+  /**
+   * @internal
+   */
+  _i18nWarn?: boolean
 }

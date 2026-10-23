@@ -1,20 +1,26 @@
 import { getRouterParam } from 'h3'
+import { createError, defineCachedEventHandler } from '#imports'
 import { fetchCrux } from '../../../app/services/crux'
-import { defineCachedEventHandler } from '#imports'
 
 export default defineCachedEventHandler(async (event) => {
   const domain = getRouterParam(event, 'domain', { decode: true })
   if (!domain) {
     throw createError({
-      statusCode: 404,
-      statusMessage: 'Site not found',
+      statusCode: 400,
+      statusMessage: 'Missing domain parameter',
     })
   }
-  return fetchCrux(domain)
+  return fetchCrux(event, domain).catch((e) => {
+    throw createError({
+      statusCode: 500,
+      statusMessage: 'CrUX Lookup Failed',
+      message: `CrUX lookup failed for "${domain}": ${e.message}`,
+    })
+  })
 }, {
-  base: 'crux',
+  base: 'crux2',
   swr: true,
-  shouldBypassCache: () => true, // !!import.meta.dev,
+  shouldBypassCache: () => import.meta.dev,
   getKey: event => getRouterParam(event, 'domain', { decode: true }),
   maxAge: 60 * 60,
   staleMaxAge: 24 * 60 * 60,

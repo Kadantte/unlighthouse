@@ -1,14 +1,17 @@
-import { join } from 'node:path'
-import fs from 'fs-extra'
 import type { Result } from 'lighthouse'
-import { map, pick, sumBy } from 'lodash-es'
-import { computeMedianRun } from 'lighthouse/core/lib/median-run.js'
-import { relative } from 'pathe'
-import { withQuery } from 'ufo'
 import type { LighthouseReport, PuppeteerTask, UnlighthouseRouteReport } from '../../types'
-import { useUnlighthouse } from '../../unlighthouse'
+import { existsSync, readFileSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { computeMedianRun } from 'lighthouse/core/lib/median-run.js'
+import { ReportGenerator } from 'lighthouse/report/generator/report-generator.js'
+import { map, pick, sumBy } from 'lodash-es'
+import { normalize, relative } from 'pathe'
+import { withQuery } from 'ufo'
 import { useLogger } from '../../logger'
-import { ReportArtifacts, base64ToBuffer } from '../../util'
+import { useUnlighthouse } from '../../unlighthouse'
+import { base64ToBuffer, ReportArtifacts } from '../../util'
+import { resolveRequestHeaders } from '../../util/requestHeaders'
 import { setupPage } from '../util'
 
 export function normaliseLighthouseResult(route: UnlighthouseRouteReport, result: Result): LighthouseReport {
@@ -91,6 +94,20 @@ export function normaliseLighthouseResult(route: UnlighthouseRouteReport, result
   }
 }
 
+/**
+ * Render the `lighthouse.html` and `lighthouse.json` artifacts from a single lighthouse result.
+ *
+ * The worker process writes both artifacts once per sample run, leaving the last run on disk. When
+ * sampling, the dashboard column renders the median run instead, so the detailed report and the
+ * column drift apart. Regenerating both artifacts from the same chosen result keeps them in sync. (#376)
+ */
+export function generateReportArtifacts(report: Result): { html: string, json: string } {
+  return {
+    html: ReportGenerator.generateReport(report, 'html') as string,
+    json: ReportGenerator.generateReport(report, 'json') as string,
+  }
+}
+
 export const runLighthouseTask: PuppeteerTask = async (props) => {
   const logger = useLogger()
   const { resolvedConfig, runtimeSettings } = useUnlighthouse()
@@ -98,10 +115,15 @@ export const runLighthouseTask: PuppeteerTask = async (props) => {
 
   // if the report doesn't exist, we're going to run a new lighthouse process to generate it
   const reportJsonPath = join(routeReport.artifactPath, ReportArtifacts.reportJson)
-  if (resolvedConfig.cache && fs.existsSync(reportJsonPath)) {
-    const report = fs.readJsonSync(reportJsonPath, { encoding: 'utf-8' }) as Result
-    routeReport.report = normaliseLighthouseResult(routeReport, report)
-    return routeReport
+  if (resolvedConfig.cache && existsSync(reportJsonPath)) {
+    try {
+      const report = JSON.parse(readFileSync(reportJsonPath, 'utf-8')) as Result
+      routeReport.report = normaliseLighthouseResult(routeReport, report)
+      return routeReport
+    }
+    catch (e) {
+      logger.warn(`Failed to read cached lighthouse report for path "${routeReport.route.path}".`, e)
+    }
   }
 
   await setupPage(page)
@@ -113,10 +135,20 @@ export const runLighthouseTask: PuppeteerTask = async (props) => {
   if (resolvedConfig.defaultQueryParams)
     clonedRouteReport.route.url = withQuery(clonedRouteReport.route.url, resolvedConfig.defaultQueryParams)
 
+  // Normalize the artifact path to use forward slashes for cross-platform compatibility
+  const routeReportForArgs = {
+    route: { url: clonedRouteReport.route.url },
+    artifactPath: normalize(clonedRouteReport.artifactPath),
+  }
+
   const args = [
     `--cache=${JSON.stringify(resolvedConfig.cache)}`,
-    `--routeReport=${JSON.stringify(pick(clonedRouteReport, ['route.url', 'artifactPath']))}`,
-    `--lighthouseOptions=${JSON.stringify(resolvedConfig.lighthouseOptions)}`,
+    `--routeReport=${JSON.stringify(routeReportForArgs)}`,
+    // cookies reach the Lighthouse page through the cookie jar, see setupPage
+    `--lighthouseOptions=${JSON.stringify({
+      ...resolvedConfig.lighthouseOptions,
+      extraHeaders: { ...resolveRequestHeaders(resolvedConfig), ...resolvedConfig.lighthouseOptions.extraHeaders },
+    })}`,
     `--port=${port}`,
   ]
 
@@ -124,22 +156,20 @@ export const runLighthouseTask: PuppeteerTask = async (props) => {
   for (let i = 0; i < resolvedConfig.scanner.samples; i++) {
     try {
       // Spawn a worker process
-      const worker = (await import('execa'))
-        .execa(
-          // handles stubbing
-          runtimeSettings.lighthouseProcessPath.endsWith('.ts') ? 'jiti' : 'node',
-          [runtimeSettings.lighthouseProcessPath, ...args],
-          {
-            timeout: 6 * 60 * 1000,
-          },
-        )
-      worker.stdout!.pipe(process.stdout)
-      worker.stderr!.pipe(process.stderr)
-      const res = await worker
+      const { x } = await import('tinyexec')
+      const res = await x(
+        // handles stubbing
+        runtimeSettings.lighthouseProcessPath.endsWith('.ts') ? 'jiti' : 'node',
+        [runtimeSettings.lighthouseProcessPath, ...args],
+        {
+          timeout: 6 * 60 * 1000,
+          nodeOptions: { stdio: ['pipe', 'inherit', 'inherit'] },
+        },
+      )
       if (res)
-        samples.push(fs.readJsonSync(reportJsonPath))
+        samples.push(JSON.parse(readFileSync(reportJsonPath, 'utf-8')))
     }
-    catch (e) {
+    catch (e: any) {
       logger.error('Failed to run lighthouse for route', e)
       return routeReport
     }
@@ -154,7 +184,7 @@ export const runLighthouseTask: PuppeteerTask = async (props) => {
   }
 
   if (report.categories.performance && !report.categories.performance.score) {
-    logger.warn(`Lighthouse failed to run performance audits for "${routeReport.route.path}", adding back to queue.`)
+    logger.warn(`Lighthouse failed to run performance audits for "${routeReport.route.path}", adding back to queue${report.runtimeError ? `: ${report.runtimeError.message}` : '.'}`)
     routeReport.tasks.runLighthouseTask = 'failed-retry'
     return routeReport
   }
@@ -166,25 +196,30 @@ export const runLighthouseTask: PuppeteerTask = async (props) => {
     catch (e) {
       logger.warn('Error when computing median score, possibly audit failed.', e)
     }
+    // the on-disk artifacts reflect the last sample run, but we display `report` (the median run);
+    // regenerate them from `report` so the detailed report matches the dashboard column. (#376)
+    const { html, json } = generateReportArtifacts(report)
+    await writeFile(join(routeReport.artifactPath, ReportArtifacts.reportHtml), html)
+    await writeFile(reportJsonPath, json)
   }
 
   // we need to export all base64 data to improve the stability of the client
   // @ts-expect-error untyped
   if (report.audits?.['final-screenshot']?.details?.data)
     // @ts-expect-error untyped
-    await fs.writeFile(join(routeReport.artifactPath, ReportArtifacts.screenshot), base64ToBuffer(report.audits['final-screenshot'].details.data))
+    await writeFile(join(routeReport.artifactPath, ReportArtifacts.screenshot), base64ToBuffer(report.audits['final-screenshot'].details.data))
 
   if (report.fullPageScreenshot?.screenshot.data)
-    await fs.writeFile(join(routeReport.artifactPath, ReportArtifacts.fullScreenScreenshot), base64ToBuffer(report.fullPageScreenshot.screenshot.data))
+    await writeFile(join(routeReport.artifactPath, ReportArtifacts.fullScreenScreenshot), base64ToBuffer(report.fullPageScreenshot.screenshot.data))
 
   // extract the screenshot-thumbnails into separate files
   const screenshotThumbnails = report.audits?.['screenshot-thumbnails']?.details
-  await fs.mkdir(join(routeReport.artifactPath, ReportArtifacts.screenshotThumbnailsDir), { recursive: true })
+  await mkdir(join(routeReport.artifactPath, ReportArtifacts.screenshotThumbnailsDir), { recursive: true })
   // @ts-expect-error untyped
   if (screenshotThumbnails?.items && screenshotThumbnails.type === 'filmstrip') {
     for (const key in screenshotThumbnails.items) {
       const thumbnail = screenshotThumbnails.items[key]
-      await fs.writeFile(join(routeReport.artifactPath, ReportArtifacts.screenshotThumbnailsDir, `${key}.jpeg`), base64ToBuffer(thumbnail.data))
+      await writeFile(join(routeReport.artifactPath, ReportArtifacts.screenshotThumbnailsDir, `${key}.jpeg`), base64ToBuffer(thumbnail.data))
     }
   }
 

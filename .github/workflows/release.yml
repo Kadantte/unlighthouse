@@ -5,36 +5,43 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+  id-token: write
+
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2.2.1
+      - uses: pnpm/action-setup@v6
 
-      - name: Use Node.js v18
-        uses: actions/setup-node@v2
+      - uses: actions/setup-node@v6
         with:
-          node-version: v18
-          registry-url: https://registry.npmjs.org/
+          node-version: 22.x
           cache: pnpm
+          registry-url: https://registry.npmjs.org
 
-      - run: npx conventional-github-releaser -p angular
-        continue-on-error: true
+      - run: pnpm dlx changelogithub@15.0.5
         env:
-          CONVENTIONAL_GITHUB_RELEASER_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install Dependencies
-        run: pnpm install
+      - run: pnpm i
 
-      - name: PNPM build
-        run: pnpm run build
+      - run: pnpm build
 
-      - name: Publish to NPM
-        run: pnpm -r publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}
+      - name: Detect prerelease tag
+        id: prerelease
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [[ "$TAG" =~ -(beta|rc|alpha) ]]; then
+            DIST_TAG=$(echo "$TAG" | sed 's/.*-\(beta\|rc\|alpha\).*/\1/')
+            echo "tag=--tag $DIST_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - run: pnpm publish -r --access public --no-git-checks --provenance ${{ steps.prerelease.outputs.tag }}
